@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from utils.file import load_dictionary_agentic, load_safety_settings
 import numpy as np
+import os
 
 load_dotenv()
 
@@ -43,7 +44,7 @@ class OriginalPromptNode(BaseNode):
             model="gpt-4o-mini",
             temperature=1,
             timeout=None,
-            api_key='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',
+            api_key=os.getenv("OPENAI_API_KEY"),
             logprobs=True
         )
 
@@ -316,7 +317,7 @@ class FinalAnswerNode(BaseNode):
             model="gpt-4o-mini",
             temperature=0,
             timeout=None,
-            api_key='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',
+            api_key=os.getenv("OPENAI_API_KEY"),
             logprobs=True
         )
         self.output_parser = StrOutputParser()
