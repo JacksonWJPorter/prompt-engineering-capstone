@@ -7,9 +7,11 @@ from agentic.nodes import (
     GraphState,
     OriginalPromptNode,
     CategorizePromptNode,
+    QueryDisambiguationNode,
     RephraseNode,
     PromptEnhancerNode,
     QualityCheckNode,
+    HumanNode,
     FinalAnswerNode
 )
 
@@ -20,8 +22,10 @@ checkpointer = MemorySaver()
 def instantiate_nodes(initial_prompt: str):
     """Initialize all workflow nodes."""
     return {
+        "human": HumanNode(initial_prompt),
         "original_prompt": OriginalPromptNode(initial_prompt),
         "categorize": CategorizePromptNode(initial_prompt),
+        "disambiguation": QueryDisambiguationNode(initial_prompt),
         "rephrase": RephraseNode(initial_prompt),
         "enhancer": PromptEnhancerNode(""),
         "quality_check": QualityCheckNode(initial_prompt, ["clarity", "specificity"]),
@@ -35,7 +39,14 @@ def quality_router(state: GraphState) -> Literal["rephrase", "context", "end"]:
 
     if "clarity" in quality_issues:
         return "rephrase"
-    return "end"
+    return "final_answer_node"
+
+
+def disambiguous_router(state: GraphState):
+    clarification = state.keys.get("clarification_question", "")
+    if clarification == "clear":
+        return "rephrase"
+    return "human"
 
 
 def build_workflow(nodes) -> StateGraph:
@@ -43,30 +54,47 @@ def build_workflow(nodes) -> StateGraph:
     workflow = StateGraph(GraphState)
 
     # Add nodes
-    workflow.add_node("original_prompt", nodes["original_prompt"])
+    workflow.add_node("human", nodes["human"])
+    # workflow.add_node("original_prompt", nodes["original_prompt"])
     workflow.add_node("categorize", nodes["categorize"])
+    workflow.add_node("disambiguation", nodes["disambiguation"])
     workflow.add_node("rephrase", nodes["rephrase"])
     workflow.add_node("enhancer", nodes["enhancer"])
-    workflow.add_node("quality_check", nodes["quality_check"])
+    # workflow.add_node("quality_check", nodes["quality_check"])
     workflow.add_node("final_answer_node", nodes["final_answer_node"])
 
-    # Define transitions
-    workflow.add_edge(START, "original_prompt")
-    workflow.add_edge("original_prompt", "categorize")
-    workflow.add_edge("categorize", "rephrase")
-    workflow.add_edge("rephrase", "enhancer")
-    workflow.add_edge("enhancer", "quality_check")
-    workflow.add_edge("quality_check", "final_answer_node")
+    # Define basic transitions
+    # workflow.add_edge(START, "original_prompt")
+    # workflow.add_edge("original_prompt", "categorize")
+    workflow.add_edge(START, "categorize")
+    workflow.add_edge("categorize", "disambiguation")
 
-    # Add conditional transitions
+    # Add conditional edges after disambiguation
     workflow.add_conditional_edges(
-        "quality_check",
-        quality_router,
+        "disambiguation",
+        disambiguous_router,
         {
             "rephrase": "rephrase",
-            "end": END
+            "human": "human"
         }
     )
+
+    # Continue with rest of workflow
+    workflow.add_edge("human", "disambiguation")
+    workflow.add_edge("rephrase", "enhancer")
+    # workflow.add_edge("enhancer", "quality_check")
+    workflow.add_edge("enhancer", "final_answer_node")
+
+    # # Add quality check routing
+    # workflow.add_conditional_edges(
+    #     "quality_check",
+    #     quality_router,
+    #     {
+    #         "rephrase": "rephrase",
+    #         "final_answer_node": "final_answer_node"
+    #     }
+    # )
+    workflow.add_edge("final_answer_node", END)
 
     return workflow
 
@@ -83,6 +111,7 @@ class AgenticEnhancer:
     def format_final_state(self, final_state) -> dict:
         """Format the final state to match the desired structure."""
 
+        # TODO: Dynamic model config
         # final_ans_model_config = final_state["keys"].get(
         #     "final_ans_model_config", {})
         # enhancedConfig = {
@@ -112,7 +141,7 @@ class AgenticEnhancer:
             # "enhancedConfig": enhancedConfig,
         }
 
-    def execute_workflow(self) -> Any:
+    def execute_workflow(self):
         try:
             final_state = self.app.invoke(self.state, config={"configurable": {
                                           "thread_id": "jackson-test-chat-id"}})

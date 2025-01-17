@@ -17,13 +17,28 @@ T = TypeVar('T', bound='GraphState')
 @dataclass
 class GraphState:
     keys: Dict[str, Any] = field(default_factory=dict)
+    clarification_history: list = field(default_factory=list)
 
     def update_keys(self, new_data: Dict[str, Any]) -> None:
         self.keys.update(new_data)
 
+    def add_clarification(self, question: str, answer: str) -> None:
+        self.clarification_history.append({
+            "question": question,
+            "answer": answer
+        })
+
+    def get_clarification_history_text(self) -> str:
+        history_text = f"###Original Prompt###: {self.keys.get('original_prompt', '')}\n"
+        for item in self.clarification_history:
+            history_text += f"---Clarification Question: {item['question']}\n"
+            history_text += f"---User Response: {item['answer']}\n"
+
+        return history_text
+
     @classmethod
     def create_initial_state(cls: type[T], initial_data: Dict[str, Any] = None) -> T:
-        return cls(keys=initial_data or {})
+        return cls(keys=initial_data or {}, clarification_history=[])
 
     def get_value(self, key: str, default: Any = None) -> Any:
         return self.keys.get(key, default)
@@ -117,43 +132,43 @@ class CategorizePromptNode(CallChatOpenAI):
         super().__init__(prompt, category="default-chat-openai")
         self.prompt_template = PromptTemplate(
             template="""
-            # Role: You are an AI prompt analyzer tasked with identifying the specific category 
+            # Role: You are an AI prompt analyzer tasked with identifying the specific category
             of question, from semi-generic prompts inputted by your user.
-            
+
             ## Task:
             **Please review user query and determine the category.**
-            
+
             # Task Instructions:
             <task instructions>
             ## Review the user prompt carefully and assign ONE category.
-            ## Please use only the following categories: 'simple question', 'summary', 
+            ## Please use only the following categories: 'simple question', 'summary',
             'creative writing and ideation', 'problem solving', 'other'
             ## Output ONE of the categories from the list provided to you.
             ## Think step-by-step to make sure you get the answer correct.
             </task instructions>
-            
+
             ## Exemplars of a user query and target chosen category:
             <exemplar outputs with target formatting>
             {{query="What is the capital of France?", category="simple question"}},
             {{query="Summarize the main points of the French Revolution.", category="summary"}},
-            {{query="Write a short story about a young woman who travels through time to meet 
+            {{query="Write a short story about a young woman who travels through time to meet
             Marie Antoinette.", category="creative writing and ideation"}},
-            {{query="My French drain is overflowing, how do I troubleshoot this problem?", 
+            {{query="My French drain is overflowing, how do I troubleshoot this problem?",
             category="problem solving"}},
             {{query="Translate 'Hello, how are you?' into French.", category="simple question"}},
             {{query="Give me a list of all the kings of France.", category="simple question"}},
-            {{query="I need ideas for a French-themed birthday party.", 
+            {{query="I need ideas for a French-themed birthday party.",
             category="creative writing and ideation"}},
-            {{query="What are the best French restaurants in Paris?", 
+            {{query="What are the best French restaurants in Paris?",
             category="simple question"}},
             {{query="Explain the rules of French grammar.", category="summary"}},
-            {{query="My car's 'check engine' light is on and the code reader says it's a P0420 
+            {{query="My car's 'check engine' light is on and the code reader says it's a P0420
             error. What should I do?", category="problem solving"}}
             </exemplar outputs with target formatting>
-            
+
             # User query to categorize:
             {question}
-            
+
             # IMPORTANT: YOUR OUTPUT MUST BE EXACTLY ONE OF THE FOLLOWING:
             simple-question, summary, creative-writing-and-ideation, problem-solving, other
             """,
@@ -182,34 +197,71 @@ class CategorizePromptNode(CallChatOpenAI):
         return state
 
 
+class QueryDisambiguationNode(CallChatOpenAI):
+    def __init__(self, prompt: str):
+        super().__init__(prompt, category="query-disambiguation")
+        self.prompt_template = PromptTemplate(
+            template="""
+            # Role: You are a clarification assistant.
+            # Task: Review the conversation history and current query to determine if further clarification is needed.
+            
+            # Context:
+            {history}
+            
+            # Important: Your response should either be "clear" if the query and its context are clear, 
+            or if anything remains unclear, your response should be a specific question to resolve the ambiguity.
+            Do not repeat previous clarification questions.
+            
+            ## Output:
+            """,
+            input_variables=["history"]
+        )
+
+    def process(self, state: GraphState) -> GraphState:
+        # Get full conversation history
+        history = state.get_clarification_history_text()
+
+        clarification_question = self.call_chat_openai(
+            self.prompt_template,
+            {"history": history}
+        ).strip().lower()
+
+        print(colored("Clarification Question: ", 'cyan',
+              attrs=["bold"]), clarification_question)
+        state.update_keys({"clarification_question": clarification_question})
+        return state
+
+
 class RephraseNode(CallChatOpenAI):
     def __init__(self, prompt: str):
         super().__init__(prompt, category="default-chat-openai")
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are an expert at helping users get the best output from LLMs.
-            
-            #Task: Analyze the user's question and rephrase it into a concise and effective prompt for a large language model. 
-            
+
+            #Task: Analyze the user's question and rephrase it into a concise and effective prompt for a large language model.
+            If the question has a history of clarifications of the original question, rephrase it all into one clear question and add the context
+            from the various clarifications.
+
             #Task instructions:
             1. Clearly state the desired output: Specify what information or task the model should perform.
-            2. Provides context and background information: Include relevant details from the 
+            2. Provides context and background information: Include relevant details from the
             context to guide the model's understanding.
             3. Uses clear and concise language: Avoid ambiguity and use easily understood language.
-            4. Is formatted for optimal processing: Use appropriate markup, formatting, or 
+            4. Is formatted for optimal processing: Use appropriate markup, formatting, or
             techniques to enhance readability and processing efficiency.
-            
+
             # User prompt:
             {question}
-            
+
             # Rephrased prompt:
             """,
             input_variables=["question"]
         )
 
     def process(self, state: GraphState) -> GraphState:
-        prompt = state.get_value("original_prompt", self.prompt)
-
+        prompt = state.get_value("human_feedback") or state.get_value(
+            "original_prompt", self.prompt)
         rephrased_question = self.call_chat_openai(
             self.prompt_template,
             {"question": prompt}
@@ -227,26 +279,26 @@ class PromptEnhancerNode(CallChatOpenAI):
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are an expert prompt enhancer who is given a suboptimal prompt.
-            
-            # Your Task: Enhance the prompt provided by the user to obtain the best response 
+
+            # Your Task: Enhance the prompt provided by the user to obtain the best response
             from an LLM that will be prompted with it.
             You do this based on the category of the prompt and its corresponding instructions.
-            
+
             #[Prompt Category]: {category}
             #[Instructions]:
             {specific_template}
-            
+
             # Always follow these guidelines:
-            (1) Assign a highly specific role to the LLM that will be prompted, corresponding 
+            (1) Assign a highly specific role to the LLM that will be prompted, corresponding
             to the task the user needs completed.
-            (2) Add markup and improve formatting of the user prompt to make it easier for the 
+            (2) Add markup and improve formatting of the user prompt to make it easier for the
             LLM to understand.
             (3) Fix any typos.
             (4) Include relevant details from the context.
-            
+
             --- [User prompt to improve]: {user_prompt}
-            
-            IMPORTANT: YOUR RESPONSE TO ME SHOULD BE AN ENHANCED VERSION OF THE 
+
+            IMPORTANT: YOUR RESPONSE TO ME SHOULD BE AN ENHANCED VERSION OF THE
             [User prompt to improve].
             """,
             input_variables=["category",
@@ -307,6 +359,50 @@ class QualityCheckNode(CallChatOpenAI):
         print(colored("Quality Issues: ",
               'light_magenta', attrs=["bold"]), issues)
         state.update_keys({"quality_issues": issues})
+        return state
+
+
+class HumanNode(BaseNode):
+    def __init__(self, prompt: str):
+        self.prompt = prompt
+        self.model = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0,
+            timeout=None,
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+
+    def process(self, state: GraphState) -> GraphState:
+        print("\n" + "="*50)
+        print(colored("Human Review Required", 'yellow', attrs=['bold']))
+
+        # Get the latest clarification question
+        clarification_question = state.get_value("clarification_question", "")
+        if clarification_question == "clear":
+            return state
+
+        # Get human feedback
+        lines = []
+        while True:
+            line = input()
+            if line:
+                lines.append(line)
+            elif lines:
+                break
+            else:
+                print("Please provide some feedback before continuing:")
+
+        feedback = "\n".join(lines)
+
+        # Add this Q&A pair to the history
+        state.add_clarification(clarification_question, feedback)
+
+        # Update the human_feedback key with the complete history
+        state.update_keys(
+            {"human_feedback": state.get_clarification_history_text()})
+        
+        print("Prompt with History:\n", state.keys['human_feedback'])
+        print("\n" + "="*50)
         return state
 
 
