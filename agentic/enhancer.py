@@ -1,5 +1,5 @@
 # prompt_enhancer.py
-from langgraph.graph import StateGraph, END, START
+from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from typing import Dict, Any, Literal
 from termcolor import colored
@@ -10,15 +10,14 @@ from agentic.nodes import (
     QueryDisambiguationNode,
     RephraseNode,
     PromptEnhancerNode,
-    QualityCheckNode,
     HumanNode,
     FinalAnswerNode,
-    VersioningNode
+    VersioningNode,
+    PromptEvaluationNode
 )
 
 # Initialize Memory to Persist State
 checkpointer = MemorySaver()
-
 
 def instantiate_nodes(initial_prompt: str):
     """Initialize all workflow nodes."""
@@ -29,7 +28,7 @@ def instantiate_nodes(initial_prompt: str):
         "disambiguation": QueryDisambiguationNode(initial_prompt),
         "rephrase": RephraseNode(initial_prompt),
         "enhancer": PromptEnhancerNode(""),
-        "quality_check": QualityCheckNode(initial_prompt, ["clarity", "specificity"]),
+        "evaluator": PromptEvaluationNode(initial_prompt),
         "final_answer_node": FinalAnswerNode(""),
         # Add versioning nodes for each step
         "v_categorize": VersioningNode("Categorizing Prompt"),
@@ -37,9 +36,9 @@ def instantiate_nodes(initial_prompt: str):
         "v_human": VersioningNode("Getting Human Feedback"),
         "v_rephrase": VersioningNode("Rephrasing Prompt"),
         "v_enhance": VersioningNode("Enhancing Prompt"),
+        "v_evaluate": VersioningNode("Evaluating Prompt"),
         "v_final": VersioningNode("Generating Final Answer")
     }
-
 
 def quality_router(state: GraphState) -> Literal["rephrase", "context", "end"]:
     """Router function to determine the next node based on quality check results."""
@@ -49,13 +48,18 @@ def quality_router(state: GraphState) -> Literal["rephrase", "context", "end"]:
         return "rephrase"
     return "final_answer_node"
 
-
 def disambiguous_router(state: GraphState):
+    """Router function for disambiguation."""
     clarification = state.keys.get("clarification_question", "")
     if clarification == "clear":
         return "rephrase"
     return "human"
 
+def evaluation_router(state: GraphState):
+    """Router function based on evaluation results."""
+    evaluation = state.keys.get("prompt_evaluation", {})
+    needs_improvement = evaluation.get("needs_improvement", False)
+    return "rephrase" if needs_improvement else "final_answer_node"
 
 def build_workflow(nodes) -> StateGraph:
     """Build the workflow graph with all nodes and transitions."""
@@ -63,10 +67,12 @@ def build_workflow(nodes) -> StateGraph:
 
     # Add nodes
     workflow.add_node("human", nodes["human"])
+    workflow.add_node("original_prompt", nodes["original_prompt"])
     workflow.add_node("categorize", nodes["categorize"])
     workflow.add_node("disambiguation", nodes["disambiguation"])
     workflow.add_node("rephrase", nodes["rephrase"])
     workflow.add_node("enhancer", nodes["enhancer"])
+    workflow.add_node("evaluator", nodes["evaluator"])
     workflow.add_node("final_answer_node", nodes["final_answer_node"])
     
     # Add versioning nodes
@@ -75,10 +81,11 @@ def build_workflow(nodes) -> StateGraph:
     workflow.add_node("v_human", nodes["v_human"])
     workflow.add_node("v_rephrase", nodes["v_rephrase"])
     workflow.add_node("v_enhance", nodes["v_enhance"])
+    workflow.add_node("v_evaluate", nodes["v_evaluate"])
     workflow.add_node("v_final", nodes["v_final"])
 
     # Define transitions with versioning
-    workflow.add_edge(START, "v_categorize")
+    workflow.add_edge("original_prompt", "v_categorize")
     workflow.add_edge("v_categorize", "categorize")
     workflow.add_edge("categorize", "v_disambiguation")
     workflow.add_edge("v_disambiguation", "disambiguation")
@@ -95,20 +102,42 @@ def build_workflow(nodes) -> StateGraph:
 
     # Continue with rest of workflow
     workflow.add_edge("v_human", "human")
-    workflow.add_edge("human", "v_disambiguation")
+    workflow.add_edge("human", "v_rephrase")
     workflow.add_edge("v_rephrase", "rephrase")
     workflow.add_edge("rephrase", "v_enhance")
     workflow.add_edge("v_enhance", "enhancer")
-    workflow.add_edge("enhancer", "v_final")
+    workflow.add_edge("enhancer", "v_evaluate")
+    workflow.add_edge("v_evaluate", "evaluator")
+
+    # Add conditional routing based on evaluation
+    workflow.add_conditional_edges(
+        "evaluator",
+        evaluation_router,
+        {
+            "rephrase": "v_rephrase",
+            "final_answer_node": "v_final"
+        }
+    )
+
     workflow.add_edge("v_final", "final_answer_node")
     workflow.add_edge("final_answer_node", END)
 
-    return workflow
+    # Set entry and exit points
+    workflow.set_entry_point("original_prompt")
+    workflow.set_finish_point("final_answer_node")
 
+    return workflow
 
 class AgenticEnhancer:
     def __init__(self, initial_prompt: str):
-        self.state = {"keys": {"original_prompt": initial_prompt}}
+        self.initial_prompt = initial_prompt
+        self.state = GraphState.create_initial_state({
+            "original_prompt": initial_prompt,
+            "enhanced_prompt": initial_prompt,
+            "needs_clarification": False,
+            "category": None,
+            "version": 1
+        })
 
         # Initialize workflow
         nodes = instantiate_nodes(initial_prompt)
@@ -138,20 +167,39 @@ class AgenticEnhancer:
         final_prompt_lin_probs = final_state["keys"].get(
             "final_prompt_lin_probs", "N/A")
         enhanced_prompt = final_state["keys"].get("enhanced_prompt", "N/A")
+        
+        # Get evaluation results
+        evaluation_results = final_state["keys"].get("prompt_evaluation", {})
 
         return {
+            "original_prompt": self.initial_prompt,
             "original_prompt_answer": original_prompt_answer,
             "original_prompt_lin_probs": original_prompt_lin_probs,
             "final_prompt_answer": final_prompt_answer,
             "final_prompt_lin_probs": final_prompt_lin_probs,
             "enhanced_prompt": enhanced_prompt,
             # "enhancedConfig": enhancedConfig,
+            "prompt_evaluation": {
+                "overall_score": evaluation_results.get("overall_score"),
+                "scores": evaluation_results.get("scores", {}),
+                "feedback": evaluation_results.get("feedback", {}),
+                "suggestions": evaluation_results.get("improvement_suggestions", []),
+                "needs_improvement": evaluation_results.get("needs_improvement", False)
+            }
         }
 
     def execute_workflow(self):
         try:
-            final_state = self.app.invoke(self.state, config={"configurable": {
-                                          "thread_id": "jackson-test-chat-id"}})
+            # Add configuration for checkpointer
+            config = {
+                "configurable": {
+                    "thread_id": "agentic-workflow",  # Unique thread ID
+                    "checkpoint_ns": "prompt-enhancement",  # Namespace for checkpoints
+                    "checkpoint_id": f"prompt-{hash(self.initial_prompt)}"  # Unique ID for this run
+                }
+            }
+            
+            final_state = self.app.invoke(self.state, config=config)
             final_state_formatted = self.format_final_state(final_state)
 
             return final_state_formatted

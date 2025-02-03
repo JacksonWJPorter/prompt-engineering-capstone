@@ -9,7 +9,7 @@ from utils.file import load_dictionary_agentic, load_safety_settings
 import numpy as np
 import os
 
-load_dotenv()0
+load_dotenv()
 
 T = TypeVar('T', bound='GraphState')
 
@@ -465,5 +465,152 @@ class VersioningNode(BaseNode):
         for idx, step in enumerate(steps, 1):
             print(colored(f"Step {idx}: {step}", 'green'))
         print(colored("=====================\n", 'green', attrs=["bold"]))
+        
+        return state
+
+
+# ... (existing imports) ...
+from dataclasses import dataclass
+import json
+from termcolor import colored
+
+# Add this new class after your existing node classes
+class PromptEvaluationNode(CallChatOpenAI):
+    def __init__(self, prompt: str):
+        super().__init__(prompt, category="default-chat-openai")
+        self.evaluation_template = PromptTemplate(
+            template="""You are an expert prompt evaluator. Analyze this prompt thoroughly.
+
+PROMPT TO EVALUATE:
+{prompt}
+
+Evaluate each dimension and provide specific, actionable feedback.
+Score each dimension from 1-10 and explain your reasoning.
+
+Return strictly in this JSON format:
+{{
+    "scores": {{
+        "clarity": <1-10>,
+        "specificity": <1-10>,
+        "completeness": <1-10>,
+        "structure": <1-10>,
+        "task_focus": <1-10>
+    }},
+    "feedback": {{
+        "clarity": ["<specific feedback>", "<improvement needed>"],
+        "specificity": ["<specific feedback>", "<improvement needed>"],
+        "completeness": ["<specific feedback>", "<improvement needed>"],
+        "structure": ["<specific feedback>", "<improvement needed>"],
+        "task_focus": ["<specific feedback>", "<improvement needed>"]
+    }},
+    "improvement_suggestions": [
+        "<actionable suggestion 1>",
+        "<actionable suggestion 2>",
+        "<actionable suggestion 3>"
+    ]
+}}""",
+            input_variables=["prompt"]
+        )
+
+    def _create_progress_bar(self, score: float, max_length: int = 20) -> str:
+        """Create a visual progress bar based on score"""
+        filled = int(score * max_length / 10)
+        return "█" * filled + "░" * (max_length - filled)
+
+    def process(self, state: GraphState) -> GraphState:
+        prompt = state.get_value("enhanced_prompt", self.prompt)
+        
+        print("\n" + "="*70)
+        print(colored("🔍 PROMPT EVALUATION IN PROGRESS", "cyan", attrs=["bold"]))
+        print("="*70)
+        
+        print(colored("\n📝 Original Prompt:", "yellow"))
+        print(f"{prompt}\n")
+        
+        try:
+            # Get evaluation from LLM
+            evaluation_json = self.call_chat_openai(
+                self.evaluation_template,
+                {"prompt": prompt}
+            )
+            results = json.loads(evaluation_json)
+            
+            # Calculate overall score
+            weights = {
+                "clarity": 0.25,
+                "specificity": 0.2,
+                "completeness": 0.2,
+                "structure": 0.15,
+                "task_focus": 0.2
+            }
+            overall_score = sum(
+                results["scores"][metric] * weight 
+                for metric, weight in weights.items()
+            )
+            
+            # Display Results
+            print(colored("\n📊 EVALUATION SCORES", "cyan", attrs=["bold"]))
+            print("-" * 40)
+            
+            # Overall Score
+            score_color = "green" if overall_score >= 8 else "yellow" if overall_score >= 6 else "red"
+            print(colored(f"\n🎯 Overall Score: {overall_score:.1f}/10", score_color, attrs=["bold"]))
+            print(colored(self._create_progress_bar(overall_score, 30), score_color))
+            
+            # Individual Scores
+            print(colored("\n📈 Dimension Scores:", "cyan"))
+            for dimension, score in results["scores"].items():
+                color = "green" if score >= 8 else "yellow" if score >= 6 else "red"
+                print(f"{dimension.title():12} {colored(f'{score}/10 {self._create_progress_bar(score)}', color)}")
+            
+            # Detailed Feedback
+            print(colored("\n💡 DETAILED FEEDBACK", "cyan", attrs=["bold"]))
+            print("-" * 40)
+            for dimension, feedback_list in results["feedback"].items():
+                print(colored(f"\n{dimension.title()}:", "yellow"))
+                for feedback in feedback_list:
+                    print(f"  ✓ {feedback}")
+            
+            # Improvement Suggestions
+            print(colored("\n🚀 IMPROVEMENT SUGGESTIONS", "cyan", attrs=["bold"]))
+            print("-" * 40)
+            for i, suggestion in enumerate(results["improvement_suggestions"], 1):
+                print(f"{i}. {suggestion}")
+            
+            # Final Assessment
+            print(colored("\n📋 FINAL ASSESSMENT", "cyan", attrs=["bold"]))
+            print("-" * 40)
+            if overall_score >= 8:
+                print(colored("✨ Excellent prompt! Ready for use.", "green"))
+            elif overall_score >= 6:
+                print(colored("⚠️ Good prompt with room for improvement.", "yellow"))
+            else:
+                print(colored("❌ Significant improvements needed.", "red"))
+            
+            print("\n" + "="*70 + "\n")
+            
+            # Update state
+            state.update_keys({
+                "prompt_evaluation": {
+                    "scores": results["scores"],
+                    "overall_score": overall_score,
+                    "feedback": results["feedback"],
+                    "suggestions": results["improvement_suggestions"],
+                    "needs_improvement": overall_score < 7.0
+                }
+            })
+            
+        except Exception as e:
+            print(colored(f"Error in evaluation: {e}", "red"))
+            # Set default evaluation results in case of error
+            state.update_keys({
+                "prompt_evaluation": {
+                    "scores": {},
+                    "overall_score": 0,
+                    "feedback": {},
+                    "suggestions": [],
+                    "needs_improvement": True
+                }
+            })
         
         return state
