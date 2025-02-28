@@ -1,3 +1,5 @@
+import json
+from dataclasses import dataclass
 from typing import Dict, TypedDict, Any, TypeVar
 from langchain_openai import ChatOpenAI, OpenAI
 from langchain_core.output_parsers import StrOutputParser
@@ -45,15 +47,44 @@ class GraphState:
 
 
 class BaseNode:
+    def __init__(self, event_emitter=None):
+        self.event_emitter = event_emitter
+
     def process(self, state: GraphState) -> GraphState:
         raise NotImplementedError("Subclasses must implement process()")
 
     def __call__(self, state: GraphState) -> GraphState:
-        return self.process(state)
+        result_state = self.process(state)
+
+        # Emit node completion event if an emitter is available
+        if self.event_emitter:
+            # Get node name from class name
+            node_name = self.__class__.__name__
+
+            # Get relevant data to send to frontend
+            node_data = self.get_node_data(result_state)
+
+            # Emit the event
+            self.event_emitter.emit_node_completion(node_name, node_data)
+
+        return result_state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        """
+        Extract relevant data from the state to send to the frontend.
+        Override this in specific node classes to customize data.
+        """
+        # Default implementation returns basic info
+        return {
+            "status": "completed",
+            "node_type": self.__class__.__name__,
+            "current_step": state.get_value("current_step", "unknown")
+        }
 
 
 class OriginalPromptNode(BaseNode):
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(event_emitter)
         self.prompt = prompt
         self.model = ChatOpenAI(
             model="gpt-4o-mini",
@@ -87,9 +118,19 @@ class OriginalPromptNode(BaseNode):
             print(f"Error in OriginalPromptNode: {e}")
             return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "OriginalPromptNode",
+            "original_prompt": state.get_value("original_prompt", ""),
+            "original_prompt_answer": state.get_value("original_prompt_answer", ""),
+            "original_prompt_lin_probs": state.get_value("original_prompt_lin_probs", 0)
+        }
+
 
 class CallChatOpenAI(BaseNode):
-    def __init__(self, prompt: str, category: str = "default-chat-openai"):
+    def __init__(self, prompt: str, category: str = "default-chat-openai", event_emitter=None):
+        super().__init__(event_emitter)
         self.prompt = prompt
         self.category = category
         self.model_configs = self.load_category_specific_config()
@@ -128,8 +169,8 @@ class CallChatOpenAI(BaseNode):
 
 
 class CategorizePromptNode(CallChatOpenAI):
-    def __init__(self, prompt: str):
-        super().__init__(prompt, category="default-chat-openai")
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are an AI prompt analyzer tasked with identifying the specific category
@@ -196,10 +237,17 @@ class CategorizePromptNode(CallChatOpenAI):
         state.update_keys({"category": category})
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "CategorizePromptNode",
+            "category": state.get_value("category", "unknown")
+        }
+
 
 class QueryDisambiguationNode(CallChatOpenAI):
-    def __init__(self, prompt: str):
-        super().__init__(prompt, category="query-disambiguation")
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="query-disambiguation", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are a clarification assistant.
@@ -211,6 +259,9 @@ class QueryDisambiguationNode(CallChatOpenAI):
             # Important: Your response should either be "clear" if the query and its context are clear, 
             or if anything remains unclear, your response should be a specific question to resolve the ambiguity.
             Do not repeat previous clarification questions.
+            
+            **Important**: The query does not need to be perfectly clear in all aspects down to every specific.
+            If it is generally clear enough, mark it as "clear".
             
             ## Output:
             """,
@@ -231,10 +282,18 @@ class QueryDisambiguationNode(CallChatOpenAI):
         state.update_keys({"clarification_question": clarification_question})
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "QueryDisambiguationNode",
+            "clarification_question": state.get_value("clarification_question", ""),
+            "needs_clarification": state.get_value("clarification_question", "") != "clear"
+        }
+
 
 class RephraseNode(CallChatOpenAI):
-    def __init__(self, prompt: str):
-        super().__init__(prompt, category="default-chat-openai")
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are an expert at helping users get the best output from LLMs.
@@ -272,10 +331,18 @@ class RephraseNode(CallChatOpenAI):
         state.update_keys({"rephrased_question": rephrased_question})
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "RephraseNode",
+            "original_prompt": state.get_value("original_prompt", ""),
+            "rephrased_question": state.get_value("rephrased_question", "")
+        }
+
 
 class PromptEnhancerNode(CallChatOpenAI):
-    def __init__(self, prompt: str):
-        super().__init__(prompt)
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are an expert prompt enhancer who is given a suboptimal prompt.
@@ -327,10 +394,178 @@ class PromptEnhancerNode(CallChatOpenAI):
         state.update_keys({"enhanced_prompt": enhanced_prompt})
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "PromptEnhancerNode",
+            "category": state.get_value("category", "other"),
+            "rephrased_question": state.get_value("rephrased_question", ""),
+            "enhanced_prompt": state.get_value("enhanced_prompt", "")
+        }
+
+
+class QueryDisambiguationNode(CallChatOpenAI):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="query-disambiguation", event_emitter=event_emitter)
+        self.prompt_template = PromptTemplate(
+            template="""
+            # Role: You are a clarification assistant.
+            # Task: Review the conversation history and current query to determine if further clarification is needed.
+            
+            # Context:
+            {history}
+            
+            # Important: Your response should either be "clear" if the query and its context are clear, 
+            or if anything remains unclear, your response should be a specific question to resolve the ambiguity.
+            Do not repeat previous clarification questions.
+            
+            **Important**: The query does not need to be perfectly clear in all aspects down to every specific.
+            If it is generally clear enough, mark it as "clear".
+            
+            ## Output:
+            """,
+            input_variables=["history"]
+        )
+
+    def process(self, state: GraphState) -> GraphState:
+        # Get full conversation history
+        history = state.get_clarification_history_text()
+
+        clarification_question = self.call_chat_openai(
+            self.prompt_template,
+            {"history": history}
+        ).strip().lower()
+
+        print(colored("Clarification Question: ", 'cyan',
+              attrs=["bold"]), clarification_question)
+        state.update_keys({"clarification_question": clarification_question})
+        return state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "QueryDisambiguationNode",
+            "clarification_question": state.get_value("clarification_question", ""),
+            "needs_clarification": state.get_value("clarification_question", "") != "clear"
+        }
+
+
+class RephraseNode(CallChatOpenAI):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
+        self.prompt_template = PromptTemplate(
+            template="""
+            # Role: You are an expert at helping users get the best output from LLMs.
+
+            #Task: Analyze the user's question and rephrase it into a concise and effective prompt for a large language model.
+            If the question has a history of clarifications of the original question, rephrase it all into one clear question and add the context
+            from the various clarifications.
+
+            #Task instructions:
+            1. Clearly state the desired output: Specify what information or task the model should perform.
+            2. Provides context and background information: Include relevant details from the
+            context to guide the model's understanding.
+            3. Uses clear and concise language: Avoid ambiguity and use easily understood language.
+            4. Is formatted for optimal processing: Use appropriate markup, formatting, or
+            techniques to enhance readability and processing efficiency.
+
+            # User prompt:
+            {question}
+
+            # Rephrased prompt:
+            """,
+            input_variables=["question"]
+        )
+
+    def process(self, state: GraphState) -> GraphState:
+        prompt = state.get_value("human_feedback") or state.get_value(
+            "original_prompt", self.prompt)
+        rephrased_question = self.call_chat_openai(
+            self.prompt_template,
+            {"question": prompt}
+        ).strip()
+
+        print(colored("Rephrased Prompt: ", 'light_magenta',
+              attrs=["bold"]), rephrased_question)
+        state.update_keys({"rephrased_question": rephrased_question})
+        return state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "RephraseNode",
+            "original_prompt": state.get_value("original_prompt", ""),
+            "rephrased_question": state.get_value("rephrased_question", "")
+        }
+
+
+class PromptEnhancerNode(CallChatOpenAI):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
+        self.prompt_template = PromptTemplate(
+            template="""
+            # Role: You are an expert prompt enhancer who is given a suboptimal prompt.
+
+            # Your Task: Enhance the prompt provided by the user to obtain the best response
+            from an LLM that will be prompted with it.
+            You do this based on the category of the prompt and its corresponding instructions.
+
+            #[Prompt Category]: {category}
+            #[Instructions]:
+            {specific_template}
+
+            # Always follow these guidelines:
+            (1) Assign a highly specific role to the LLM that will be prompted, corresponding
+            to the task the user needs completed.
+            (2) Add markup and improve formatting of the user prompt to make it easier for the
+            LLM to understand.
+            (3) Fix any typos.
+            (4) Include relevant details from the context.
+
+            --- [User prompt to improve]: {user_prompt}
+
+            IMPORTANT: YOUR RESPONSE TO ME SHOULD BE AN ENHANCED VERSION OF THE
+            [User prompt to improve].
+            """,
+            input_variables=["category",
+                             "user_prompt", "specific_template"]
+        )
+
+    def process(self, state: GraphState) -> GraphState:
+        category = state.get_value("category", "other")
+        user_prompt = state.get_value("rephrased_question", self.prompt)
+
+        # params = load_dictionary_agentic(category)
+        params = load_dictionary_agentic('default-chat-openai')
+        specific_template = params.get('PROMPT', "No specific template found")
+
+        enhanced_prompt = self.call_chat_openai(
+            self.prompt_template,
+            {
+                "category": category,
+                "user_prompt": user_prompt,
+                "specific_template": specific_template
+            },
+        ).strip()
+
+        print(colored("Enhanced Prompt: ", 'light_magenta',
+              attrs=["bold"]), enhanced_prompt)
+        state.update_keys({"enhanced_prompt": enhanced_prompt})
+        return state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "PromptEnhancerNode",
+            "category": state.get_value("category", "other"),
+            "rephrased_question": state.get_value("rephrased_question", ""),
+            "enhanced_prompt": state.get_value("enhanced_prompt", "")
+        }
+
 
 class QualityCheckNode(CallChatOpenAI):
-    def __init__(self, prompt: str, quality_criteria: list):
-        super().__init__(prompt, category="default-chat-openai")
+    def __init__(self, prompt: str, quality_criteria: list, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.quality_criteria = quality_criteria
 
     def process(self, state: GraphState) -> GraphState:
@@ -361,9 +596,18 @@ class QualityCheckNode(CallChatOpenAI):
         state.update_keys({"quality_issues": issues})
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "QualityCheckNode",
+            "enhanced_prompt": state.get_value("enhanced_prompt", ""),
+            "quality_issues": state.get_value("quality_issues", [])
+        }
+
 
 class HumanNode(BaseNode):
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(event_emitter)
         self.prompt = prompt
         self.model = ChatOpenAI(
             model="gpt-4o-mini",
@@ -400,14 +644,23 @@ class HumanNode(BaseNode):
         # Update the human_feedback key with the complete history
         state.update_keys(
             {"human_feedback": state.get_clarification_history_text()})
-        
+
         print("Prompt with History:\n", state.keys['human_feedback'])
         print("\n" + "="*50)
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "HumanNode",
+            "clarification_question": state.get_value("clarification_question", ""),
+            "human_feedback": state.get_value("human_feedback", "")
+        }
+
 
 class FinalAnswerNode(BaseNode):
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(event_emitter)
         self.prompt = prompt
         self.model = ChatOpenAI(
             model="gpt-4o-mini",
@@ -442,73 +695,86 @@ class FinalAnswerNode(BaseNode):
             print(f"Error in FinalAnswerNode: {e}")
             return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "FinalAnswerNode",
+            "enhanced_prompt": state.get_value("enhanced_prompt", ""),
+            "final_prompt_answer": state.get_value("final_prompt_answer", ""),
+            "final_prompt_lin_probs": state.get_value("final_prompt_lin_probs", 0)
+        }
+
 
 class VersioningNode(BaseNode):
-    def __init__(self, step_name: str):
+    def __init__(self, step_name: str, event_emitter=None):
+        super().__init__(event_emitter)
         self.step_name = step_name
-        
+
     def process(self, state: GraphState) -> GraphState:
         # Get or initialize the steps list
         steps = state.get_value("workflow_steps", [])
-        
+
         # Add the current step
         steps.append(self.step_name)
-        
+
         # Update state with new steps
         state.update_keys({
             "workflow_steps": steps,
             "current_step": self.step_name
         })
-        
+
         # Print progress
         print(colored("\n=== Workflow Progress ===", 'green', attrs=["bold"]))
         for idx, step in enumerate(steps, 1):
             print(colored(f"Step {idx}: {step}", 'green'))
         print(colored("=====================\n", 'green', attrs=["bold"]))
-        
+
         return state
 
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "status": "completed",
+            "node_type": "VersioningNode",
+            "step_name": self.step_name,
+            "workflow_steps": state.get_value("workflow_steps", []),
+            "current_step": state.get_value("current_step", "")
+        }
 
-# ... (existing imports) ...
-from dataclasses import dataclass
-import json
-from termcolor import colored
 
-# Add this new class after your existing node classes
 class PromptEvaluationNode(CallChatOpenAI):
-    def __init__(self, prompt: str):
-        super().__init__(prompt, category="default-chat-openai")
+    def __init__(self, prompt: str, event_emitter=None):
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.evaluation_template = PromptTemplate(
             template="""You are an expert prompt evaluator. Analyze this prompt thoroughly.
 
-PROMPT TO EVALUATE:
-{prompt}
+        PROMPT TO EVALUATE:
+        {prompt}
 
-Evaluate each dimension and provide specific, actionable feedback.
-Score each dimension from 1-10 and explain your reasoning.
+        Evaluate each dimension and provide specific, actionable feedback.
+        Score each dimension from 1-10 and explain your reasoning.
 
-Return strictly in this JSON format:
-{{
-    "scores": {{
-        "clarity": <1-10>,
-        "specificity": <1-10>,
-        "completeness": <1-10>,
-        "structure": <1-10>,
-        "task_focus": <1-10>
-    }},
-    "feedback": {{
-        "clarity": ["<specific feedback>", "<improvement needed>"],
-        "specificity": ["<specific feedback>", "<improvement needed>"],
-        "completeness": ["<specific feedback>", "<improvement needed>"],
-        "structure": ["<specific feedback>", "<improvement needed>"],
-        "task_focus": ["<specific feedback>", "<improvement needed>"]
-    }},
-    "improvement_suggestions": [
-        "<actionable suggestion 1>",
-        "<actionable suggestion 2>",
-        "<actionable suggestion 3>"
-    ]
-}}""",
+        Return strictly in this JSON format:
+        {{
+            "scores": {{
+                "clarity": <1-10>,
+                "specificity": <1-10>,
+                "completeness": <1-10>,
+                "structure": <1-10>,
+                "task_focus": <1-10>
+            }},
+            "feedback": {{
+                "clarity": ["<specific feedback>", "<improvement needed>"],
+                "specificity": ["<specific feedback>", "<improvement needed>"],
+                "completeness": ["<specific feedback>", "<improvement needed>"],
+                "structure": ["<specific feedback>", "<improvement needed>"],
+                "task_focus": ["<specific feedback>", "<improvement needed>"]
+            }},
+            "improvement_suggestions": [
+                "<actionable suggestion 1>",
+                "<actionable suggestion 2>",
+                "<actionable suggestion 3>"
+            ]
+        }}""",
             input_variables=["prompt"]
         )
 
@@ -519,14 +785,15 @@ Return strictly in this JSON format:
 
     def process(self, state: GraphState) -> GraphState:
         prompt = state.get_value("enhanced_prompt", self.prompt)
-        
+
         print("\n" + "="*70)
-        print(colored("🔍 PROMPT EVALUATION IN PROGRESS", "cyan", attrs=["bold"]))
+        print(colored("🔍 PROMPT EVALUATION IN PROGRESS",
+              "cyan", attrs=["bold"]))
         print("="*70)
-        
+
         print(colored("\n📝 Original Prompt:", "yellow"))
         print(f"{prompt}\n")
-        
+
         try:
             # Get evaluation from LLM
             evaluation_json = self.call_chat_openai(
@@ -534,7 +801,7 @@ Return strictly in this JSON format:
                 {"prompt": prompt}
             )
             results = json.loads(evaluation_json)
-            
+
             # Calculate overall score
             weights = {
                 "clarity": 0.25,
@@ -544,25 +811,28 @@ Return strictly in this JSON format:
                 "task_focus": 0.2
             }
             overall_score = sum(
-                results["scores"][metric] * weight 
+                results["scores"][metric] * weight
                 for metric, weight in weights.items()
             )
-            
+
             # Display Results
             print(colored("\n📊 EVALUATION SCORES", "cyan", attrs=["bold"]))
             print("-" * 40)
-            
+
             # Overall Score
             score_color = "green" if overall_score >= 8 else "yellow" if overall_score >= 6 else "red"
-            print(colored(f"\n🎯 Overall Score: {overall_score:.1f}/10", score_color, attrs=["bold"]))
-            print(colored(self._create_progress_bar(overall_score, 30), score_color))
-            
+            print(colored(
+                f"\n🎯 Overall Score: {overall_score:.1f}/10", score_color, attrs=["bold"]))
+            print(colored(self._create_progress_bar(
+                overall_score, 30), score_color))
+
             # Individual Scores
             print(colored("\n📈 Dimension Scores:", "cyan"))
             for dimension, score in results["scores"].items():
                 color = "green" if score >= 8 else "yellow" if score >= 6 else "red"
-                print(f"{dimension.title():12} {colored(f'{score}/10 {self._create_progress_bar(score)}', color)}")
-            
+                print(
+                    f"{dimension.title():12} {colored(f'{score}/10 {self._create_progress_bar(score)}', color)}")
+
             # Detailed Feedback
             print(colored("\n💡 DETAILED FEEDBACK", "cyan", attrs=["bold"]))
             print("-" * 40)
@@ -570,13 +840,14 @@ Return strictly in this JSON format:
                 print(colored(f"\n{dimension.title()}:", "yellow"))
                 for feedback in feedback_list:
                     print(f"  ✓ {feedback}")
-            
+
             # Improvement Suggestions
-            print(colored("\n🚀 IMPROVEMENT SUGGESTIONS", "cyan", attrs=["bold"]))
+            print(colored("\n🚀 IMPROVEMENT SUGGESTIONS",
+                  "cyan", attrs=["bold"]))
             print("-" * 40)
             for i, suggestion in enumerate(results["improvement_suggestions"], 1):
                 print(f"{i}. {suggestion}")
-            
+
             # Final Assessment
             print(colored("\n📋 FINAL ASSESSMENT", "cyan", attrs=["bold"]))
             print("-" * 40)
@@ -586,9 +857,9 @@ Return strictly in this JSON format:
                 print(colored("⚠️ Good prompt with room for improvement.", "yellow"))
             else:
                 print(colored("❌ Significant improvements needed.", "red"))
-            
+
             print("\n" + "="*70 + "\n")
-            
+
             # Update state
             state.update_keys({
                 "prompt_evaluation": {
@@ -599,7 +870,7 @@ Return strictly in this JSON format:
                     "needs_improvement": overall_score < 7.0
                 }
             })
-            
+
         except Exception as e:
             print(colored(f"Error in evaluation: {e}", "red"))
             # Set default evaluation results in case of error
@@ -612,5 +883,17 @@ Return strictly in this JSON format:
                     "needs_improvement": True
                 }
             })
-        
+
         return state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        evaluation = state.get_value("prompt_evaluation", {})
+        return {
+            "status": "completed",
+            "node_type": "PromptEvaluationNode",
+            "enhanced_prompt": state.get_value("enhanced_prompt", ""),
+            "overall_score": evaluation.get("overall_score", 0),
+            "scores": evaluation.get("scores", {}),
+            "needs_improvement": evaluation.get("needs_improvement", True),
+            "suggestions_count": len(evaluation.get("suggestions", []))
+        }
