@@ -753,7 +753,7 @@ class PromptEvaluationNode(CallChatOpenAI):
         Evaluate each dimension and provide specific, actionable feedback.
         Score each dimension from 1-10 and explain your reasoning.
 
-        Return strictly in this JSON format:
+        Return strictly in this JSON format WITHOUT ANY OTHER TEXT before or after the JSON:
         {{
             "scores": {{
                 "clarity": <1-10>,
@@ -774,7 +774,9 @@ class PromptEvaluationNode(CallChatOpenAI):
                 "<actionable suggestion 2>",
                 "<actionable suggestion 3>"
             ]
-        }}""",
+        }}
+
+        IMPORTANT: Your response must be ONLY the JSON object above with no additional text.""",
             input_variables=["prompt"]
         )
 
@@ -785,6 +787,13 @@ class PromptEvaluationNode(CallChatOpenAI):
 
     def process(self, state: GraphState) -> GraphState:
         prompt = state.get_value("enhanced_prompt", self.prompt)
+
+        # Get the iteration count (or initialize to 0)
+        iteration_count = state.get_value("iteration_count", 0)
+
+        # Increment iteration count
+        iteration_count += 1
+        state.update_keys({"iteration_count": iteration_count})
 
         print("\n" + "="*70)
         print(colored("🔍 PROMPT EVALUATION IN PROGRESS",
@@ -800,6 +809,19 @@ class PromptEvaluationNode(CallChatOpenAI):
                 self.evaluation_template,
                 {"prompt": prompt}
             )
+
+            # Try to fix common JSON issues
+            evaluation_json = evaluation_json.strip()
+
+            # Find JSON boundaries
+            start_idx = evaluation_json.find("{")
+            end_idx = evaluation_json.rfind("}")
+
+            if start_idx >= 0 and end_idx >= 0 and end_idx > start_idx:
+                # Extract just the JSON part
+                evaluation_json = evaluation_json[start_idx:end_idx+1]
+
+            # Parse the JSON
             results = json.loads(evaluation_json)
 
             # Calculate overall score
@@ -860,6 +882,10 @@ class PromptEvaluationNode(CallChatOpenAI):
 
             print("\n" + "="*70 + "\n")
 
+            # Determine if improvement is needed based on score AND iteration count
+            # After 3 attempts, we'll consider it good enough regardless of score
+            needs_improvement = overall_score < 7.0 and iteration_count < 3
+
             # Update state
             state.update_keys({
                 "prompt_evaluation": {
@@ -867,20 +893,23 @@ class PromptEvaluationNode(CallChatOpenAI):
                     "overall_score": overall_score,
                     "feedback": results["feedback"],
                     "suggestions": results["improvement_suggestions"],
-                    "needs_improvement": overall_score < 7.0
+                    "needs_improvement": needs_improvement,
+                    "iteration_count": iteration_count
                 }
             })
 
         except Exception as e:
             print(colored(f"Error in evaluation: {e}", "red"))
             # Set default evaluation results in case of error
+            # After 2 attempts with errors, stop trying to improve
             state.update_keys({
                 "prompt_evaluation": {
                     "scores": {},
-                    "overall_score": 0,
+                    "overall_score": 5.0,  # Default middle score
                     "feedback": {},
                     "suggestions": [],
-                    "needs_improvement": True
+                    "needs_improvement": iteration_count < 2,  # Only try twice on error
+                    "iteration_count": iteration_count
                 }
             })
 
@@ -894,6 +923,6 @@ class PromptEvaluationNode(CallChatOpenAI):
             "enhanced_prompt": state.get_value("enhanced_prompt", ""),
             "overall_score": evaluation.get("overall_score", 0),
             "scores": evaluation.get("scores", {}),
-            "needs_improvement": evaluation.get("needs_improvement", True),
+            "needs_improvement": evaluation.get("needs_improvement", False),
             "suggestions_count": len(evaluation.get("suggestions", []))
         }

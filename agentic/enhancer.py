@@ -62,9 +62,18 @@ def disambiguous_router(state: GraphState):
 
 def evaluation_router(state: GraphState):
     """Router function based on evaluation results."""
-    evaluation = state.keys.get("prompt_evaluation", {})
+    evaluation = state.get_value("prompt_evaluation", {})
     needs_improvement = evaluation.get("needs_improvement", False)
-    return "rephrase" if needs_improvement else "final_answer_node"
+    iteration_count = evaluation.get("iteration_count", 0)
+
+    print(
+        f"Evaluation router: needs_improvement={needs_improvement}, iteration_count={iteration_count}")
+
+    # Either the prompt is good enough or we've tried enough times
+    if not needs_improvement or iteration_count >= 3:
+        return "final_answer_node"
+    else:
+        return "rephrase"
 
 
 def build_workflow(nodes) -> StateGraph:
