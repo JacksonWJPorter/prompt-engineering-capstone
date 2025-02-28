@@ -50,6 +50,7 @@ def quality_router(state: GraphState) -> Literal["rephrase", "context", "end"]:
 
 def disambiguous_router(state: GraphState):
     """Router function for disambiguation."""
+
     clarification = state.keys.get("clarification_question", "")
     if clarification == "clear":
         return "rephrase"
@@ -67,13 +68,13 @@ def build_workflow(nodes) -> StateGraph:
 
     # Add nodes
     workflow.add_node("human", nodes["human"])
-    workflow.add_node("original_prompt", nodes["original_prompt"])
+
+    # workflow.add_node("original_prompt", nodes["original_prompt"])
     workflow.add_node("categorize", nodes["categorize"])
     workflow.add_node("disambiguation", nodes["disambiguation"])
     workflow.add_node("rephrase", nodes["rephrase"])
     workflow.add_node("enhancer", nodes["enhancer"])
     workflow.add_node("evaluator", nodes["evaluator"])
-    workflow.add_node("final_answer_node", nodes["final_answer_node"])
     
     # Add versioning nodes
     workflow.add_node("v_categorize", nodes["v_categorize"])
