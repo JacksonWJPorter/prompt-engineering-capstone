@@ -54,7 +54,8 @@ class NodeEventEmitter:
             # Add additional metadata
             event_data = {
                 'node_name': node_name,
-                'node_data': node_data,
+                'node_type': node_data.get('node_type', node_name),
+                'node_output': node_data.get('node_output', None),
                 'timestamp': time.time(),
                 'session_id': self.session_id
             }

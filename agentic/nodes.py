@@ -74,6 +74,39 @@ class BaseNode:
         Extract relevant data from the state to send to the frontend.
         Override this in specific node classes to customize data.
         """
+        # Default implementation returns node type and output
+        return {
+            "node_type": self.__class__.__name__,
+            "node_output": None  # Default to None, should be overridden by subclasses
+        }
+
+    def __init__(self, event_emitter=None):
+        self.event_emitter = event_emitter
+
+    def process(self, state: GraphState) -> GraphState:
+        raise NotImplementedError("Subclasses must implement process()")
+
+    def __call__(self, state: GraphState) -> GraphState:
+        result_state = self.process(state)
+
+        # Emit node completion event if an emitter is available
+        if self.event_emitter:
+            # Get node name from class name
+            node_name = self.__class__.__name__
+
+            # Get relevant data to send to frontend
+            node_data = self.get_node_data(result_state)
+
+            # Emit the event
+            self.event_emitter.emit_node_completion(node_name, node_data)
+
+        return result_state
+
+    def get_node_data(self, state: GraphState) -> dict:
+        """
+        Extract relevant data from the state to send to the frontend.
+        Override this in specific node classes to customize data.
+        """
         # Default implementation returns basic info
         return {
             "status": "completed",
@@ -120,11 +153,8 @@ class OriginalPromptNode(BaseNode):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "OriginalPromptNode",
-            "original_prompt": state.get_value("original_prompt", ""),
-            "original_prompt_answer": state.get_value("original_prompt_answer", ""),
-            "original_prompt_lin_probs": state.get_value("original_prompt_lin_probs", 0)
+            "node_output": state.get_value("original_prompt_answer", "")
         }
 
 
@@ -139,13 +169,13 @@ class CallChatOpenAI(BaseNode):
 
     def load_category_specific_config(self) -> Dict[str, Any]:
         try:
-            # return load_dictionary_agentic(self.category)
-            return load_dictionary_agentic('default-chat-openai')
+            # Load configuration based on the given category
+            return load_dictionary_agentic(self.category)
         except Exception as e:
             print(f"Error loading config for category '{self.category}': {e}")
             return {}
 
-    def init_model(self, model_configs={}) -> ChatOpenAI:
+    def init_model(self, model_configs: Dict[str, Any] = None) -> ChatOpenAI:
         try:
             model_configs = model_configs or self.model_configs
             return ChatOpenAI(**model_configs)
@@ -166,6 +196,12 @@ class CallChatOpenAI(BaseNode):
 
     def process(self, state: GraphState) -> GraphState:
         raise NotImplementedError("Subclasses must implement process()")
+
+    def get_node_data(self, state: GraphState) -> dict:
+        return {
+            "node_type": self.__class__.__name__,
+            "prompt": self.prompt
+        }
 
 
 class CategorizePromptNode(CallChatOpenAI):
@@ -239,9 +275,8 @@ class CategorizePromptNode(CallChatOpenAI):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "CategorizePromptNode",
-            "category": state.get_value("category", "unknown")
+            "node_output": state.get_value("category", "unknown")
         }
 
 
@@ -284,10 +319,8 @@ class QueryDisambiguationNode(CallChatOpenAI):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "QueryDisambiguationNode",
-            "clarification_question": state.get_value("clarification_question", ""),
-            "needs_clarification": state.get_value("clarification_question", "") != "clear"
+            "node_output": state.get_value("clarification_question", "")
         }
 
 
@@ -333,10 +366,8 @@ class RephraseNode(CallChatOpenAI):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "RephraseNode",
-            "original_prompt": state.get_value("original_prompt", ""),
-            "rephrased_question": state.get_value("rephrased_question", "")
+            "node_output": state.get_value("rephrased_question", "")
         }
 
 
@@ -396,11 +427,8 @@ class PromptEnhancerNode(CallChatOpenAI):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "PromptEnhancerNode",
-            "category": state.get_value("category", "other"),
-            "rephrased_question": state.get_value("rephrased_question", ""),
-            "enhanced_prompt": state.get_value("enhanced_prompt", "")
+            "node_output": state.get_value("enhanced_prompt", "")
         }
 
 
@@ -651,10 +679,8 @@ class HumanNode(BaseNode):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "HumanNode",
-            "clarification_question": state.get_value("clarification_question", ""),
-            "human_feedback": state.get_value("human_feedback", "")
+            "node_output": state.get_value("human_feedback", "")
         }
 
 
@@ -697,11 +723,8 @@ class FinalAnswerNode(BaseNode):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "FinalAnswerNode",
-            "enhanced_prompt": state.get_value("enhanced_prompt", ""),
-            "final_prompt_answer": state.get_value("final_prompt_answer", ""),
-            "final_prompt_lin_probs": state.get_value("final_prompt_lin_probs", 0)
+            "node_output": state.get_value("final_prompt_answer", "")
         }
 
 
@@ -733,11 +756,8 @@ class VersioningNode(BaseNode):
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
-            "status": "completed",
             "node_type": "VersioningNode",
-            "step_name": self.step_name,
-            "workflow_steps": state.get_value("workflow_steps", []),
-            "current_step": state.get_value("current_step", "")
+            "node_output": self.step_name
         }
 
 
@@ -917,12 +937,8 @@ class PromptEvaluationNode(CallChatOpenAI):
 
     def get_node_data(self, state: GraphState) -> dict:
         evaluation = state.get_value("prompt_evaluation", {})
+        # Return the entire evaluation object as the node_output
         return {
-            "status": "completed",
             "node_type": "PromptEvaluationNode",
-            "enhanced_prompt": state.get_value("enhanced_prompt", ""),
-            "overall_score": evaluation.get("overall_score", 0),
-            "scores": evaluation.get("scores", {}),
-            "needs_improvement": evaluation.get("needs_improvement", False),
-            "suggestions_count": len(evaluation.get("suggestions", []))
+            "node_output": evaluation
         }
