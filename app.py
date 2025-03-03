@@ -91,17 +91,6 @@ def agentic_enhancer():
     event_emitter = NodeEventEmitter(socketio, session_id)
     print(f"Created event emitter for session: {session_id}")
 
-    # Send a test event to verify connection
-    try:
-        socketio.emit('processing_started', {
-            'message': 'Starting prompt enhancement process',
-            'session_id': session_id,
-            'timestamp': time.time()
-        })
-        print("Sent processing_started event")
-    except Exception as e:
-        print(f"Error sending test event: {str(e)}")
-
     # Initialize the enhancer with the emitter
     agentic = AgenticEnhancer(original_prompt, event_emitter=event_emitter)
 
@@ -121,7 +110,6 @@ def agentic_enhancer():
         agentic_answer = agentic.execute_workflow()
 
         enhanced_prompt = agentic_answer.get("enhanced_prompt")
-        answer = agentic_answer.get("final_prompt_answer")
 
         # Send completion event
         socketio.emit('processing_completed', {
@@ -133,7 +121,6 @@ def agentic_enhancer():
         return {
             "originalPrompt": original_prompt,
             "enhancedPrompt": enhanced_prompt,
-            "answer": answer,
         }
     except Exception as e:
         print(f"Error executing workflow: {str(e)}")
@@ -146,7 +133,7 @@ def agentic_enhancer():
         # Return a more helpful error response
         return {
             "originalPrompt": original_prompt,
-            "enhancedPrompt": original_prompt,  # Return original as fallback
+            "enhancedPrompt": original_prompt,
             "answer": f"Error: {str(e)}",
             "error": True
         }, 500
