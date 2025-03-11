@@ -652,180 +652,131 @@ class PromptEvaluationNode(CallChatOpenAI):
     def __init__(self, prompt: str, event_emitter=None):
         super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.evaluation_template = PromptTemplate(
-            template="""You are an expert prompt evaluator. Analyze this prompt thoroughly.
+            template="""You are a demanding prompt evaluation expert. First identify essential requirements, then evaluate with high but fair standards.
 
         PROMPT TO EVALUATE:
         {prompt}
 
-        Evaluate each dimension and provide specific, actionable feedback.
-        Score each dimension from 1-10 and explain your reasoning.
+        First identify critical requirements:
+        - Temporal precision needed? (dates, periods, deadlines)
+        - Geographic specificity needed? (location, jurisdiction, scope)
+        - Technical accuracy needed? (terms, definitions, parameters)
+        - Scope boundaries needed? (limits, inclusions, exclusions)
+        - Format requirements needed? (structure, presentation, detail level)
 
-        Return strictly in this JSON format WITHOUT ANY OTHER TEXT before or after the JSON:
+        Score the prompt (0-100) based on these criteria:
+        1. Specificity (40 points):
+           - Core clarity: Clear and precise objective (10 points)
+           - Required context (based on prompt needs): (20 points)
+             * Temporal specification (if time matters)
+             * Geographic definition (if location matters)
+             * Scope boundaries (always required)
+             * Audience/expertise level (if needed)
+           - Parameters and constraints (10 points)
+
+        2. Structure & Clarity (30 points):
+           - Clear phrasing (10 points)
+           - Logical organization (10 points)
+           - Professional tone (10 points)
+
+        3. Response Expectations (30 points):
+           - Detail requirements (10 points)
+           - Format specifications (10 points)
+           - Quality standards (10 points)
+
+        Scoring Guidelines:
+        95-100: Perfect prompt (extremely rare)
+        85-89: Excellent prompt with comprehensive requirements
+        80-84: Very strong prompt with minor gaps
+        70-79: Good prompt needing improvement
+        Below 70: Significant deficiencies
+
+        IMPORTANT: 
+        - Start at 100 and deduct points as follows:
+          * Critical omissions: -15 points
+          * Significant gaps: -8 points
+          * Minor issues: -3 points
+          * Slight imperfections: -1 point
+        - Give credit for:
+          * Comprehensive structure (+5)
+          * Numbered/clear organization (+3)
+          * Specific data points (+3)
+          * Source requirements (+2)
+        - Well-structured prompts with clear requirements should score 80+
+        - Basic prompts should still score low
+
+        Return strictly in this JSON format WITHOUT ANY OTHER TEXT:
         {{
-            "scores": {{
-                "clarity": <1-10>,
-                "specificity": <1-10>,
-                "completeness": <1-10>,
-                "structure": <1-10>,
-                "task_focus": <1-10>
-            }},
-            "feedback": {{
-                "clarity": ["<specific feedback>", "<improvement needed>"],
-                "specificity": ["<specific feedback>", "<improvement needed>"],
-                "completeness": ["<specific feedback>", "<improvement needed>"],
-                "structure": ["<specific feedback>", "<improvement needed>"],
-                "task_focus": ["<specific feedback>", "<improvement needed>"]
-            }},
+            "score": <0-100>,
+            "justification": "<One precise sentence highlighting critical flaws or excellence>",
             "improvement_suggestions": [
-                "<actionable suggestion 1>",
-                "<actionable suggestion 2>",
-                "<actionable suggestion 3>"
+                "<specific improvement for highest priority gap>",
+                "<specific improvement for second priority gap>",
+                "<specific improvement for third priority gap>"
             ]
-        }}
-
-        IMPORTANT: Your response must be ONLY the JSON object above with no additional text.""",
+        }}""",
             input_variables=["prompt"]
         )
 
-    def _create_progress_bar(self, score: float, max_length: int = 20) -> str:
-        """Create a visual progress bar based on score"""
-        filled = int(score * max_length / 10)
-        return "█" * filled + "░" * (max_length - filled)
-
     def process(self, state: GraphState) -> GraphState:
-        prompt = state.get_value("enhanced_prompt", self.prompt)
-
-        # Get the iteration count (or initialize to 0)
-        iteration_count = state.get_value("iteration_count", 0)
-
-        # Increment iteration count
-        iteration_count += 1
-        state.update_keys({"iteration_count": iteration_count})
-
-        print("\n" + "="*70)
-        print(colored("🔍 PROMPT EVALUATION IN PROGRESS",
-              "cyan", attrs=["bold"]))
-        print("="*70)
-
-        print(colored("\n📝 Original Prompt:", "yellow"))
-        print(f"{prompt}\n")
-
+        prompt = state.get_value("original_prompt", self.prompt)
+        
         try:
-            # Get evaluation from LLM
             evaluation_json = self.call_chat_openai(
                 self.evaluation_template,
                 {"prompt": prompt}
             )
 
-            # Try to fix common JSON issues
+            # Clean JSON response
             evaluation_json = evaluation_json.strip()
-
-            # Find JSON boundaries
             start_idx = evaluation_json.find("{")
             end_idx = evaluation_json.rfind("}")
-
             if start_idx >= 0 and end_idx >= 0 and end_idx > start_idx:
-                # Extract just the JSON part
                 evaluation_json = evaluation_json[start_idx:end_idx+1]
 
-            # Parse the JSON
             results = json.loads(evaluation_json)
+            score = results["score"]
 
-            # Calculate overall score
-            weights = {
-                "clarity": 0.25,
-                "specificity": 0.2,
-                "completeness": 0.2,
-                "structure": 0.15,
-                "task_focus": 0.2
-            }
-            overall_score = sum(
-                results["scores"][metric] * weight
-                for metric, weight in weights.items()
-            )
+            # Color coding based on score
+            score_color = 'red'
+            if score >= 90:
+                score_color = 'green'
+            elif score >= 70:
+                score_color = 'yellow'
+            elif score >= 50:
+                score_color = 'magenta'
 
-            # Display Results
-            print(colored("\n📊 EVALUATION SCORES", "cyan", attrs=["bold"]))
-            print("-" * 40)
-
-            # Overall Score
-            score_color = "green" if overall_score >= 8 else "yellow" if overall_score >= 6 else "red"
-            print(colored(
-                f"\n🎯 Overall Score: {overall_score:.1f}/10", score_color, attrs=["bold"]))
-            print(colored(self._create_progress_bar(
-                overall_score, 30), score_color))
-
-            # Individual Scores
-            print(colored("\n📈 Dimension Scores:", "cyan"))
-            for dimension, score in results["scores"].items():
-                color = "green" if score >= 8 else "yellow" if score >= 6 else "red"
-                print(
-                    f"{dimension.title():12} {colored(f'{score}/10 {self._create_progress_bar(score)}', color)}")
-
-            # Detailed Feedback
-            print(colored("\n💡 DETAILED FEEDBACK", "cyan", attrs=["bold"]))
-            print("-" * 40)
-            for dimension, feedback_list in results["feedback"].items():
-                print(colored(f"\n{dimension.title()}:", "yellow"))
-                for feedback in feedback_list:
-                    print(f"  ✓ {feedback}")
-
-            # Improvement Suggestions
-            print(colored("\n🚀 IMPROVEMENT SUGGESTIONS",
-                  "cyan", attrs=["bold"]))
-            print("-" * 40)
-            for i, suggestion in enumerate(results["improvement_suggestions"], 1):
+            # Print formatted evaluation with only score colored
+            print("\n=== PROMPT EVALUATION ===")
+            print(f"Score: {colored(str(score), score_color)}")
+            print(f"Score Justification: {results['justification']}")
+            print("\nImprovement Suggestions:")
+            for i, suggestion in enumerate(results['improvement_suggestions'], 1):
                 print(f"{i}. {suggestion}")
-
-            # Final Assessment
-            print(colored("\n📋 FINAL ASSESSMENT", "cyan", attrs=["bold"]))
-            print("-" * 40)
-            if overall_score >= 8:
-                print(colored("✨ Excellent prompt! Ready for use.", "green"))
-            elif overall_score >= 6:
-                print(colored("⚠️ Good prompt with room for improvement.", "yellow"))
-            else:
-                print(colored("❌ Significant improvements needed.", "red"))
-
-            print("\n" + "="*70 + "\n")
-
-            # Determine if improvement is needed based on score AND iteration count
-            # After 3 attempts, we'll consider it good enough regardless of score
-            needs_improvement = overall_score < 7.0 and iteration_count < 3
 
             # Update state
             state.update_keys({
                 "prompt_evaluation": {
-                    "scores": results["scores"],
-                    "overall_score": overall_score,
-                    "feedback": results["feedback"],
-                    "suggestions": results["improvement_suggestions"],
-                    "needs_improvement": needs_improvement,
-                    "iteration_count": iteration_count
+                    "score": score,
+                    "justification": results["justification"],
+                    "suggestions": results["improvement_suggestions"]
                 }
             })
 
         except Exception as e:
             print(colored(f"Error in evaluation: {e}", "red"))
-            # Set default evaluation results in case of error
-            # After 2 attempts with errors, stop trying to improve
             state.update_keys({
                 "prompt_evaluation": {
-                    "scores": {},
-                    "overall_score": 5.0,  # Default middle score
-                    "feedback": {},
-                    "suggestions": [],
-                    "needs_improvement": iteration_count < 2,  # Only try twice on error
-                    "iteration_count": iteration_count
+                    "score": 40,
+                    "justification": "Error during evaluation",
+                    "suggestions": []
                 }
             })
 
         return state
 
     def get_node_data(self, state: GraphState) -> dict:
-        evaluation = state.get_value("prompt_evaluation", {})
-        # Return the entire evaluation object as the node_output
         return {
             "node_type": "PromptEvaluationNode",
-            "node_output": evaluation
+            "node_output": state.get_value("prompt_evaluation", {})
         }

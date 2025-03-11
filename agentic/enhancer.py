@@ -1,7 +1,7 @@
 # prompt_enhancer.py
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
-from typing import Dict, Any, Literal
+from typing import Dict, Any
 from termcolor import colored
 from agentic.nodes import (
     GraphState,
@@ -26,19 +26,16 @@ def instantiate_nodes(initial_prompt: str, event_emitter=None):
 
 
 def evaluation_router(state: GraphState):
-    """Router function based on evaluation results."""
+    """Route based on evaluation score."""
     evaluation = state.get_value("prompt_evaluation", {})
     needs_improvement = evaluation.get("needs_improvement", False)
     iteration_count = evaluation.get("iteration_count", 0)
+    score = evaluation.get("score", 0)
 
-    print(
-        f"Evaluation router: needs_improvement={needs_improvement}, iteration_count={iteration_count}")
-
-    # Either the prompt is good enough or we've tried enough times
-    if not needs_improvement or iteration_count >= 3:
+    # Either the prompt is good enough (>= 75) or we've tried 3 times
+    if score >= 75 or iteration_count >= 3:
         return "final_answer_node"
-    else:
-        return "rephrase"
+    return "rephrase"
 
 
 def build_workflow(nodes) -> StateGraph:
@@ -68,9 +65,8 @@ class AgenticEnhancer:
         self.state = GraphState.create_initial_state({
             "original_prompt": initial_prompt,
             "enhanced_prompt": initial_prompt,
-            "needs_clarification": False,
             "category": None,
-            "version": 1
+            "iteration_count": 0
         })
 
         # Initialize workflow
@@ -79,21 +75,18 @@ class AgenticEnhancer:
         self.app = self.workflow.compile(checkpointer=checkpointer)
 
     def format_final_state(self, final_state) -> dict:
-        """Format the final state to match the desired structure."""
+        """Format the final state with evaluation results."""
         enhanced_prompt = final_state["keys"].get("enhanced_prompt", "N/A")
-
-        # Get evaluation results
-        evaluation_results = final_state["keys"].get("prompt_evaluation", {})
-
+        evaluation = final_state["keys"].get("prompt_evaluation", {})
+        
         return {
             "original_prompt": self.initial_prompt,
             "enhanced_prompt": enhanced_prompt,
-            "prompt_evaluation": {
-                "overall_score": evaluation_results.get("overall_score"),
-                "scores": evaluation_results.get("scores", {}),
-                "feedback": evaluation_results.get("feedback", {}),
-                "suggestions": evaluation_results.get("improvement_suggestions", []),
-                "needs_improvement": evaluation_results.get("needs_improvement", False)
+            "evaluation": {
+                "score": evaluation.get("score"),
+                "justification": evaluation.get("justification"),
+                "suggestions": evaluation.get("suggestions", []),
+                "iteration_count": evaluation.get("iteration_count", 0)
             }
         }
 
@@ -110,9 +103,7 @@ class AgenticEnhancer:
             }
 
             final_state = self.app.invoke(self.state, config=config)
-            final_state_formatted = self.format_final_state(final_state)
-
-            return final_state_formatted
+            return self.format_final_state(final_state)
 
         except Exception as e:
             print(colored(f"Error during workflow execution: {str(e)}",
