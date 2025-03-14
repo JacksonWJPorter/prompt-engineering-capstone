@@ -660,6 +660,7 @@ class PromptEvaluationNode(CallChatOpenAI):
 
         First identify prompt complexity and appropriate score ranges:
         - Basic factual question (e.g., "Who is the president?") → 30-45 range
+        - Vague/generic prompt (e.g., "Tell me about AI", "Write an essay") → 30-50 range
         - List or recommendation request (e.g., "What are the safest countries for solo travelers?") → 50-60 range 
         - Simple task with minimal context → 46-65 range
         - Creative writing assistance (e.g., "Help developing a character for my novel") → 70-79 range
@@ -682,12 +683,21 @@ class PromptEvaluationNode(CallChatOpenAI):
            - Format specifications (10 points)
            - Quality standards (10 points)
 
+        STRICT PENALTIES FOR VAGUE PROMPTS:
+        - Prompt lacks specific objective: -10 to -15 points
+        - Missing necessary context: -5 to -20 points (depending on severity)
+        - No clarity on desired output format: -5 to -10 points
+        - Ambiguous terminology: -3 to -8 points per instance
+        - No scope limits or constraints: -5 to -15 points
+        - Generic requests like "tell me about X": maximum score of 35
+
         CRITICAL SCORING INSTRUCTIONS:
         1. Use VARIED END DIGITS in your scoring. Your scores should have a mix of end digits:
            - Use scores ending in 1, 2, 3, 4, 6, 7, 8, 9 MOST of the time
            - Occasionally use scores ending in 0 or 5, but not as your default
         
         2. SPECIFIC EXAMPLE SCORES:
+           - For vague prompts: 22, 27, 31, 34 (lower scores for greater vagueness)
            - For basic questions: 32, 37, 41, 44 (not always 40 or 45)
            - For list/recommendation requests: 52, 54, 57, 59 (within 50-60 range)
            - For simple tasks: 53, 58, 62, 64 (not always 50, 55, 60, 65)
@@ -707,6 +717,7 @@ class PromptEvaluationNode(CallChatOpenAI):
            - Score each criterion independently
            - Use precise point allocations (not just multiples of 5)
            - Consider specific strengths and weaknesses
+           - BE STRICT on prompts lacking specificity, context, or clear expectations
 
         Return strictly in this JSON format:
         {{
