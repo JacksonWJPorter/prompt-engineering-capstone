@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from utils.file import load_dictionary_agentic, load_safety_settings
 import numpy as np
 import os
+import random
 
 load_dotenv()
 
@@ -652,26 +653,23 @@ class PromptEvaluationNode(CallChatOpenAI):
     def __init__(self, prompt: str, event_emitter=None):
         super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.evaluation_template = PromptTemplate(
-            template="""You are a demanding prompt evaluation expert. First identify essential requirements, then evaluate with high but fair standards.
+            template="""You are a demanding prompt evaluation expert with a precise scoring system.
 
         PROMPT TO EVALUATE:
         {prompt}
 
-        First identify critical requirements:
-        - Temporal precision needed? (dates, periods, deadlines)
-        - Geographic specificity needed? (location, jurisdiction, scope)
-        - Technical accuracy needed? (terms, definitions, parameters)
-        - Scope boundaries needed? (limits, inclusions, exclusions)
-        - Format requirements needed? (structure, presentation, detail level)
+        First identify prompt complexity and appropriate score ranges:
+        - Basic factual question (e.g., "Who is the president?") → 30-45 range
+        - List or recommendation request (e.g., "What are the safest countries for solo travelers?") → 50-60 range 
+        - Simple task with minimal context → 46-65 range
+        - Creative writing assistance (e.g., "Help developing a character for my novel") → 70-79 range
+        - Moderate complexity task with some context → 66-85 range
+        - Complex task with detailed requirements → 86-98 range
 
-        Score the prompt (0-100) based on these criteria:
+        Score the prompt (1-99) based on these criteria:
         1. Specificity (40 points):
            - Core clarity: Clear and precise objective (10 points)
            - Required context (based on prompt needs): (20 points)
-             * Temporal specification (if time matters)
-             * Geographic definition (if location matters)
-             * Scope boundaries (always required)
-             * Audience/expertise level (if needed)
            - Parameters and constraints (10 points)
 
         2. Structure & Clarity (30 points):
@@ -684,30 +682,35 @@ class PromptEvaluationNode(CallChatOpenAI):
            - Format specifications (10 points)
            - Quality standards (10 points)
 
-        Scoring Guidelines:
-        95-100: Perfect prompt (extremely rare)
-        85-89: Excellent prompt with comprehensive requirements
-        80-84: Very strong prompt with minor gaps
-        70-79: Good prompt needing improvement
-        Below 70: Significant deficiencies
+        CRITICAL SCORING INSTRUCTIONS:
+        1. Use VARIED END DIGITS in your scoring. Your scores should have a mix of end digits:
+           - Use scores ending in 1, 2, 3, 4, 6, 7, 8, 9 MOST of the time
+           - Occasionally use scores ending in 0 or 5, but not as your default
+        
+        2. SPECIFIC EXAMPLE SCORES:
+           - For basic questions: 32, 37, 41, 44 (not always 40 or 45)
+           - For list/recommendation requests: 52, 54, 57, 59 (within 50-60 range)
+           - For simple tasks: 53, 58, 62, 64 (not always 50, 55, 60, 65)
+           - For creative writing prompts: 71, 74, 76, 78 (within 70-79 range)
+           - For standard prompts: 67, 71, 76, 83 (varied, not just 70, 75, 80, 85)
+           - For enhanced prompts: 73, 77, 82, 84, 86 (NOT automatically 85)
+        
+        3. IMPORTANT - Each prompt must be evaluated independently:
+           - DO NOT automatically add 10 points to rephrased/enhanced prompts
+           - Some enhancements deserve +3 points, others +7, others +15, etc.
+           - Minor improvements might add 2-5 points
+           - Moderate improvements might add 6-12 points
+           - Major improvements might add 13-20 points
+           - Some poor "enhancements" might even reduce the score
 
-        IMPORTANT: 
-        - Start at 100 and deduct points as follows:
-          * Critical omissions: -15 points
-          * Significant gaps: -8 points
-          * Minor issues: -3 points
-          * Slight imperfections: -1 point
-        - Give credit for:
-          * Comprehensive structure (+5)
-          * Numbered/clear organization (+3)
-          * Specific data points (+3)
-          * Source requirements (+2)
-        - Well-structured prompts with clear requirements should score 80+
-        - Basic prompts should still score low
+        4. Your final score should reflect a detailed assessment:
+           - Score each criterion independently
+           - Use precise point allocations (not just multiples of 5)
+           - Consider specific strengths and weaknesses
 
-        Return strictly in this JSON format WITHOUT ANY OTHER TEXT:
+        Return strictly in this JSON format:
         {{
-            "score": <0-100>,
+            "score": <integer_between_1_and_99>,
             "justification": "<One precise sentence highlighting critical flaws or excellence>",
             "improvement_suggestions": [
                 "<specific improvement for highest priority gap>",
@@ -719,6 +722,7 @@ class PromptEvaluationNode(CallChatOpenAI):
         )
 
     def process(self, state: GraphState) -> GraphState:
+        # Use original prompt exclusively for evaluation
         prompt = state.get_value("original_prompt", self.prompt)
         
         try:
@@ -735,7 +739,13 @@ class PromptEvaluationNode(CallChatOpenAI):
                 evaluation_json = evaluation_json[start_idx:end_idx+1]
 
             results = json.loads(evaluation_json)
-            score = results["score"]
+            score = int(results["score"])
+            
+            # If the score ends in 0 or 5, adjust it slightly
+            if score % 5 == 0:
+                # Add a small random adjustment (-2 to +2)
+                adjustment = random.choice([-2, -1, 1, 2])
+                score = max(1, min(99, score + adjustment))  # Keep between 1-99
 
             # Color coding based on score
             score_color = 'red'
@@ -767,7 +777,7 @@ class PromptEvaluationNode(CallChatOpenAI):
             print(colored(f"Error in evaluation: {e}", "red"))
             state.update_keys({
                 "prompt_evaluation": {
-                    "score": 40,
+                    "score": 43,  # Using a non-multiple of 5 for errors too
                     "justification": "Error during evaluation",
                     "suggestions": []
                 }
