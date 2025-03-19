@@ -74,9 +74,57 @@ class AgenticEnhancer:
         self.workflow = build_workflow(nodes)
         self.app = self.workflow.compile(checkpointer=checkpointer)
 
+    def clean_markdown(self, text):
+        """Remove all markdown formatting from text."""
+        if not text or not isinstance(text, str):
+            return text
+            
+        # Remove common markdown formatting
+        text = text.replace('**', '')
+        text = text.replace('*', '')
+        
+        # Remove headings (# to ######)
+        for i in range(1, 7):
+            heading_marker = '#' * i + ' '
+            text = text.replace(heading_marker, '')
+        text = text.replace('#', '')
+        
+        # Remove other common markdown elements
+        text = text.replace('===', '')
+        text = text.replace('---', '')
+        text = text.replace('```', '')
+        text = text.replace('`', '')
+        text = text.replace('> ', '')
+        
+        # Replace markdown list markers with plain text alternatives
+        lines = text.split('\n')
+        for i in range(len(lines)):
+            # Replace bullet points with plain bullets
+            if lines[i].strip().startswith('- '):
+                lines[i] = lines[i].replace('- ', '• ', 1)
+            # Handle numbered lists
+            if len(lines[i]) > 2 and lines[i][0].isdigit() and lines[i][1] == '.' and lines[i][2] == ' ':
+                lines[i] = '  ' + lines[i][3:]
+        
+        # Put it back together
+        text = '\n'.join(lines)
+        
+        # Clean up any double spaces resulting from replacements
+        while '  ' in text:
+            text = text.replace('  ', ' ')
+        
+        # Clean up any extra newlines
+        while '\n\n\n' in text:
+            text = text.replace('\n\n\n', '\n\n')
+            
+        return text
+
     def format_final_state(self, final_state) -> dict:
         """Format the final state with evaluation results."""
         enhanced_prompt = final_state["keys"].get("enhanced_prompt", "N/A")
+        # Clean any remaining markdown
+        enhanced_prompt = self.clean_markdown(enhanced_prompt)
+        
         evaluation = final_state["keys"].get("prompt_evaluation", {})
         
         return {

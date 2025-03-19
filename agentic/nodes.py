@@ -390,17 +390,21 @@ class PromptEnhancerNode(CallChatOpenAI):
             # Always follow these guidelines:
             (1) Assign a highly specific role to the LLM that will be prompted, corresponding
             to the task the user needs completed.
-            (2) Add markup and improve formatting of the user prompt to make it easier for the
-            LLM to understand.
+            (2) Improve formatting of the user prompt to make it easier for the
+            LLM to understand using plain text formatting only.
             (3) Fix any typos.
             (4) Include relevant details from the context.
-            (5) DO NOT use markdown formatting in your response. Avoid using *, **, #, ##, etc.
-               Format your text using line breaks, dashes, and indentation instead.
+            (5) DO NOT use any markdown formatting in your response. No asterisks, no hashtags, 
+               no backticks, no formatting symbols of any kind.
+            (6) Use plain text only with regular paragraphs, line breaks, and simple formatting 
+               like dashes or bullets using standard characters.
+            (7) For emphasis, use capitalization rather than asterisks or other markdown.
+            (8) For structure, use line breaks, indentation, and plain text bullet points (•).
 
             --- [User prompt to improve]: {user_prompt}
 
-            IMPORTANT: YOUR RESPONSE TO ME SHOULD BE AN ENHANCED VERSION OF THE
-            [User prompt to improve] WITH NO MARKDOWN FORMATTING.
+            IMPORTANT: YOUR RESPONSE MUST BE 100% PLAIN TEXT WITH ABSOLUTELY NO MARKDOWN 
+            FORMATTING SYMBOLS OF ANY KIND.
             """,
             input_variables=["category",
                              "user_prompt", "specific_template"]
@@ -423,10 +427,58 @@ class PromptEnhancerNode(CallChatOpenAI):
             },
         ).strip()
 
+        # Clean up any markdown that might have been used despite instructions
+        enhanced_prompt = self.clean_markdown(enhanced_prompt)
+
         print(colored("Enhanced Prompt: ", 'light_magenta',
               attrs=["bold"]), enhanced_prompt)
         state.update_keys({"enhanced_prompt": enhanced_prompt})
         return state
+
+    def clean_markdown(self, text):
+        """Remove all markdown formatting from text."""
+        if not text:
+            return text
+            
+        # Remove common markdown formatting
+        text = text.replace('**', '')
+        text = text.replace('*', '')
+        
+        # Remove headings (# to ######)
+        for i in range(1, 7):
+            heading_marker = '#' * i + ' '
+            text = text.replace(heading_marker, '')
+        text = text.replace('#', '')
+        
+        # Remove other common markdown elements
+        text = text.replace('===', '')
+        text = text.replace('---', '')
+        text = text.replace('```', '')
+        text = text.replace('`', '')
+        text = text.replace('> ', '')
+        
+        # Replace markdown list markers with plain text alternatives
+        lines = text.split('\n')
+        for i in range(len(lines)):
+            # Replace bullet points with plain bullets
+            if lines[i].strip().startswith('- '):
+                lines[i] = lines[i].replace('- ', '• ', 1)
+            # Handle numbered lists
+            if len(lines[i]) > 2 and lines[i][0].isdigit() and lines[i][1] == '.' and lines[i][2] == ' ':
+                lines[i] = '  ' + lines[i][3:]
+        
+        # Put it back together
+        text = '\n'.join(lines)
+        
+        # Clean up any double spaces resulting from replacements
+        while '  ' in text:
+            text = text.replace('  ', ' ')
+        
+        # Clean up any extra newlines
+        while '\n\n\n' in text:
+            text = text.replace('\n\n\n', '\n\n')
+            
+        return text
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
