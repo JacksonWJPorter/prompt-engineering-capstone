@@ -388,7 +388,7 @@ class PromptEnhancerNode(CallChatOpenAI):
             {specific_template}
 
             # Always follow these guidelines:
-            (1) Assign a highly specific role to the LLM that will be prompted, corresponding
+            (1) Assign a specific role to the LLM that will be prompted, corresponding
             to the task the user needs completed.
             (2) Improve formatting of the user prompt to make it easier for the
             LLM to understand using plain text formatting only.
@@ -398,13 +398,13 @@ class PromptEnhancerNode(CallChatOpenAI):
                no backticks, no formatting symbols of any kind.
             (6) Use plain text only with regular paragraphs, line breaks, and simple formatting 
                like dashes or bullets using standard characters.
-            (7) For emphasis, use capitalization rather than asterisks or other markdown.
+            (7) Do not use ALL CAPS for emphasis. Use normal sentence case throughout.
             (8) For structure, use line breaks, indentation, and plain text bullet points (•).
 
             --- [User prompt to improve]: {user_prompt}
 
             IMPORTANT: YOUR RESPONSE MUST BE 100% PLAIN TEXT WITH ABSOLUTELY NO MARKDOWN 
-            FORMATTING SYMBOLS OF ANY KIND.
+            FORMATTING SYMBOLS OF ANY KIND AND NO TEXT IN ALL CAPS.
             """,
             input_variables=["category",
                              "user_prompt", "specific_template"]
@@ -427,16 +427,16 @@ class PromptEnhancerNode(CallChatOpenAI):
             },
         ).strip()
 
-        # Clean up any markdown that might have been used despite instructions
-        enhanced_prompt = self.clean_markdown(enhanced_prompt)
+        # Clean up any markdown and normalize capitalization
+        enhanced_prompt = self.clean_formatting(enhanced_prompt)
 
         print(colored("Enhanced Prompt: ", 'light_magenta',
               attrs=["bold"]), enhanced_prompt)
         state.update_keys({"enhanced_prompt": enhanced_prompt})
         return state
 
-    def clean_markdown(self, text):
-        """Remove all markdown formatting from text."""
+    def clean_formatting(self, text):
+        """Remove all markdown formatting and normalize capitalization."""
         if not text:
             return text
             
@@ -469,6 +469,18 @@ class PromptEnhancerNode(CallChatOpenAI):
         
         # Put it back together
         text = '\n'.join(lines)
+        
+        # Normalize capitalization - find words in ALL CAPS and convert to normal case
+        # This preserves normal capitalization while fixing ALL CAPS words
+        words = text.split()
+        for i in range(len(words)):
+            # Check if word is all uppercase and longer than 1 character
+            if words[i].isupper() and len(words[i]) > 1:
+                # Convert to title case if it's a proper noun, lowercase otherwise
+                words[i] = words[i].title()
+        
+        # Rejoin with spaces
+        text = ' '.join(words)
         
         # Clean up any double spaces resulting from replacements
         while '  ' in text:
