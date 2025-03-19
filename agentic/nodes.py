@@ -394,11 +394,13 @@ class PromptEnhancerNode(CallChatOpenAI):
             LLM to understand.
             (3) Fix any typos.
             (4) Include relevant details from the context.
+            (5) DO NOT use markdown formatting in your response. Avoid using *, **, #, ##, etc.
+               Format your text using line breaks, dashes, and indentation instead.
 
             --- [User prompt to improve]: {user_prompt}
 
             IMPORTANT: YOUR RESPONSE TO ME SHOULD BE AN ENHANCED VERSION OF THE
-            [User prompt to improve].
+            [User prompt to improve] WITH NO MARKDOWN FORMATTING.
             """,
             input_variables=["category",
                              "user_prompt", "specific_template"]

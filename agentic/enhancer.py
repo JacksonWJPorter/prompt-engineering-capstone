@@ -103,9 +103,19 @@ class AgenticEnhancer:
             }
 
             final_state = self.app.invoke(self.state, config=config)
-            return self.format_final_state(final_state)
+            
+            # Create a formatted plain text version of the results
+            result = self.format_final_state(final_state)
+            
+            # Add original prompt answer and final prompt answer from nodes
+            result["original_prompt_answer"] = final_state["keys"].get("original_prompt_answer", "")
+            result["original_prompt_lin_probs"] = final_state["keys"].get("original_prompt_lin_probs", 0.0)
+            result["final_prompt_answer"] = final_state["keys"].get("final_prompt_answer", "")
+            result["final_prompt_lin_probs"] = final_state["keys"].get("final_prompt_lin_probs", 0.0)
+            
+            return result
 
         except Exception as e:
             print(colored(f"Error during workflow execution: {str(e)}",
-                          'red', attrs=["bold"]))
+                        'red', attrs=["bold"]))
             raise
