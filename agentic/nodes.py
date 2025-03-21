@@ -770,6 +770,7 @@ class PromptEvaluationNode(CallChatOpenAI):
            - For creative writing prompts: 71, 74, 76, 78 (within 70-79 range)
            - For standard prompts: 67, 71, 76, 83 (varied, not just 70, 75, 80, 85)
            - For enhanced prompts: 73, 77, 82, 84, 86 (NOT automatically 85)
+           - For amazing prompts that have all best practices: 89, 90, 91, 92, 93, 94 
         
         3. IMPORTANT - Each prompt must be evaluated independently:
            - DO NOT automatically add 10 points to rephrased/enhanced prompts
