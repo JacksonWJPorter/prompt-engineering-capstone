@@ -56,6 +56,49 @@ class NodeEventEmitter:
                 'node_name': node_name,
                 'node_type': node_data.get('node_type', node_name),
                 'node_output': node_data.get('node_output', None),
+                'change_text': node_data.get('change_text', f"Processed {node_name}"),
+                'timestamp': time.time(),
+                'session_id': self.session_id
+            }
+
+            # Log the actual data being sent
+            print(f"[EMIT] Data payload: {json.dumps(event_data)[:1000]}...")
+
+            # Emit the event
+            self.socketio.emit('node_completed', event_data)
+            print(f"[EMIT] Successfully emitted event for {node_name}")
+
+            # Send a confirmation event (for debugging)
+            self.socketio.emit('emit_confirmation', {
+                'message': f'Emitted {node_name} event',
+                'timestamp': time.time()
+            })
+        except Exception as e:
+            print(f"[EMIT ERROR] Failed to emit event: {str(e)}")
+
+    def __init__(self, socket_io_instance, session_id="unknown"):
+        self.socketio = socket_io_instance
+        self.session_id = session_id
+        print(f"Created NodeEventEmitter for session {session_id}")
+
+    def emit_node_completion(self, node_name, node_data):
+        """Emit a node completion event to connected clients"""
+        print(f"[EMIT] Sending node_completed event for {node_name}")
+        try:
+            # Ensure node_data is serializable
+            if node_data:
+                # Try to convert to dict if not already
+                if not isinstance(node_data, dict):
+                    try:
+                        node_data = json.loads(json.dumps(node_data))
+                    except:
+                        node_data = {"data": str(node_data)}
+
+            # Add additional metadata
+            event_data = {
+                'node_name': node_name,
+                'node_type': node_data.get('node_type', node_name),
+                'node_output': node_data.get('node_output', None),
                 'timestamp': time.time(),
                 'session_id': self.session_id
             }

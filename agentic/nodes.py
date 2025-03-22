@@ -78,7 +78,8 @@ class BaseNode:
         # Default implementation returns node type and output
         return {
             "node_type": self.__class__.__name__,
-            "node_output": None  # Default to None, should be overridden by subclasses
+            "node_output": None,
+            "change_text": f"Processed {self.__class__.__name__}"
         }
 
     def __init__(self, event_emitter=None):
@@ -219,36 +220,41 @@ class CategorizePromptNode(CallChatOpenAI):
             # Task Instructions:
             <task instructions>
             ## Review the user prompt carefully and assign ONE category.
-            ## Please use only the following categories: 'simple question', 'summary',
-            'creative writing and ideation', 'problem solving', 'other'
-            ## Output ONE of the categories from the list provided to you.
             ## Think step-by-step to make sure you get the answer correct.
             </task instructions>
 
             ## Exemplars of a user query and target chosen category:
             <exemplar outputs with target formatting>
-            {{query="What is the capital of France?", category="simple question"}},
-            {{query="Summarize the main points of the French Revolution.", category="summary"}},
+            {{query="What is the capital of France?", category="Simple Question"}},
+            {{query="Summarize the main points of the French Revolution.", category="Summary"}},
             {{query="Write a short story about a young woman who travels through time to meet
-            Marie Antoinette.", category="creative writing and ideation"}},
+            Marie Antoinette.", category="Creative Writing and Ideation"}},
             {{query="My French drain is overflowing, how do I troubleshoot this problem?",
-            category="problem solving"}},
-            {{query="Translate 'Hello, how are you?' into French.", category="simple question"}},
-            {{query="Give me a list of all the kings of France.", category="simple question"}},
+            category="Problem Solving"}},
+            {{query="Translate 'Hello, how are you?' into French.", category="Simple Question"}},
+            {{query="Give me a list of all the kings of France.", category="Simple Question"}},
             {{query="I need ideas for a French-themed birthday party.",
-            category="creative writing and ideation"}},
+            category="Creative Writing and Ideation"}},
             {{query="What are the best French restaurants in Paris?",
-            category="simple question"}},
-            {{query="Explain the rules of French grammar.", category="summary"}},
+            category="Simple Question"}},
+            {{query="Explain the rules of French grammar.", category="Summary"}},
             {{query="My car's 'check engine' light is on and the code reader says it's a P0420
-            error. What should I do?", category="problem solving"}}
+            error. What should I do?", category="Problem Solving"}},
+            {{query="Write me a Python script to detect a palindrome", category="Coding and Programming"}},
             </exemplar outputs with target formatting>
 
             # User query to categorize:
             {question}
 
-            # IMPORTANT: YOUR OUTPUT MUST BE EXACTLY ONE OF THE FOLLOWING:
-            simple-question, summary, creative-writing-and-ideation, problem-solving, other
+            # IMPORTANT: YOUR OUTPUT MUST BE EXACTLY ONE OF THE FOLLOWING WITH NO OTHER WORDS ATTACHED:
+            <output options>
+                Simple Question
+                Summary
+                Creative Writing and Ideation
+                Problem Solving
+                Coding and Programming
+                Other
+            </output options>
             """,
             input_variables=["question"]
         )
@@ -258,17 +264,6 @@ class CategorizePromptNode(CallChatOpenAI):
         category = self.call_chat_openai(
             self.prompt_template, {"question": prompt}).strip()
 
-        category_map = {
-            "simple question": 'simple-question',
-            "summary": 'summary',
-            "creative writing and ideation": 'creative-writing-and-ideation',
-            "problem solving": 'problem-solving',
-            "other": 'other'
-        }
-
-        if category in category_map:
-            category = category_map[category]
-
         print(colored("Category Determined: ",
               'light_magenta', attrs=["bold"]), category)
         state.update_keys({"category": category})
@@ -277,7 +272,8 @@ class CategorizePromptNode(CallChatOpenAI):
     def get_node_data(self, state: GraphState) -> dict:
         return {
             "node_type": "CategorizePromptNode",
-            "node_output": state.get_value("category", "unknown")
+            "node_output": state.get_value("category", "unknown"),
+            "change_text": f"Prompt categorized as: {state.get_value('category', 'unknown')}"
         }
 
 
@@ -368,7 +364,8 @@ class RephraseNode(CallChatOpenAI):
     def get_node_data(self, state: GraphState) -> dict:
         return {
             "node_type": "RephraseNode",
-            "node_output": state.get_value("rephrased_question", "")
+            "node_output": state.get_value("rephrased_question", ""),
+            "change_text": "Prompt rephrased for better AI understanding"
         }
 
 
@@ -439,24 +436,24 @@ class PromptEnhancerNode(CallChatOpenAI):
         """Remove all markdown formatting and normalize capitalization."""
         if not text:
             return text
-            
+
         # Remove common markdown formatting
         text = text.replace('**', '')
         text = text.replace('*', '')
-        
+
         # Remove headings (# to ######)
         for i in range(1, 7):
             heading_marker = '#' * i + ' '
             text = text.replace(heading_marker, '')
         text = text.replace('#', '')
-        
+
         # Remove other common markdown elements
         text = text.replace('===', '')
         text = text.replace('---', '')
         text = text.replace('```', '')
         text = text.replace('`', '')
         text = text.replace('> ', '')
-        
+
         # Replace markdown list markers with plain text alternatives
         lines = text.split('\n')
         for i in range(len(lines)):
@@ -466,10 +463,10 @@ class PromptEnhancerNode(CallChatOpenAI):
             # Handle numbered lists
             if len(lines[i]) > 2 and lines[i][0].isdigit() and lines[i][1] == '.' and lines[i][2] == ' ':
                 lines[i] = '  ' + lines[i][3:]
-        
+
         # Put it back together
         text = '\n'.join(lines)
-        
+
         # Normalize capitalization - find words in ALL CAPS and convert to normal case
         # This preserves normal capitalization while fixing ALL CAPS words
         words = text.split()
@@ -478,24 +475,25 @@ class PromptEnhancerNode(CallChatOpenAI):
             if words[i].isupper() and len(words[i]) > 1:
                 # Convert to title case if it's a proper noun, lowercase otherwise
                 words[i] = words[i].title()
-        
+
         # Rejoin with spaces
         text = ' '.join(words)
-        
+
         # Clean up any double spaces resulting from replacements
         while '  ' in text:
             text = text.replace('  ', ' ')
-        
+
         # Clean up any extra newlines
         while '\n\n\n' in text:
             text = text.replace('\n\n\n', '\n\n')
-            
+
         return text
 
     def get_node_data(self, state: GraphState) -> dict:
         return {
             "node_type": "PromptEnhancerNode",
-            "node_output": state.get_value("enhanced_prompt", "")
+            "node_output": state.get_value("enhanced_prompt", ""),
+            "change_text": "Prompt enhanced with additional context and structure"
         }
 
 
@@ -802,7 +800,7 @@ class PromptEvaluationNode(CallChatOpenAI):
     def process(self, state: GraphState) -> GraphState:
         # Use original prompt exclusively for evaluation
         prompt = state.get_value("original_prompt", self.prompt)
-        
+
         try:
             evaluation_json = self.call_chat_openai(
                 self.evaluation_template,
@@ -818,12 +816,13 @@ class PromptEvaluationNode(CallChatOpenAI):
 
             results = json.loads(evaluation_json)
             score = int(results["score"])
-            
+
             # If the score ends in 0 or 5, adjust it slightly
             if score % 5 == 0:
                 # Add a small random adjustment (-2 to +2)
                 adjustment = random.choice([-2, -1, 1, 2])
-                score = max(1, min(99, score + adjustment))  # Keep between 1-99
+                # Keep between 1-99
+                score = max(1, min(99, score + adjustment))
 
             # Color coding based on score
             score_color = 'red'
@@ -866,5 +865,6 @@ class PromptEvaluationNode(CallChatOpenAI):
     def get_node_data(self, state: GraphState) -> dict:
         return {
             "node_type": "PromptEvaluationNode",
-            "node_output": state.get_value("prompt_evaluation", {})
+            "node_output": state.get_value("prompt_evaluation", {}),
+            "change_text": f"Prompt evaluated with score: {state.get_value('prompt_evaluation', {})}/100"
         }
