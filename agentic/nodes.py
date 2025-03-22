@@ -819,11 +819,7 @@ class PromptEvaluationNode(CallChatOpenAI):
             results = json.loads(evaluation_json)
             score = int(results["score"])
             
-            # If the score ends in 0 or 5, adjust it slightly
-            if score % 5 == 0:
-                # Add a small random adjustment (-2 to +2)
-                adjustment = random.choice([-2, -1, 1, 2])
-                score = max(1, min(99, score + adjustment))  # Keep between 1-99
+            # Score adjustment code removed - use score exactly as returned
 
             # Color coding based on score
             score_color = 'red'
@@ -855,7 +851,7 @@ class PromptEvaluationNode(CallChatOpenAI):
             print(colored(f"Error in evaluation: {e}", "red"))
             state.update_keys({
                 "prompt_evaluation": {
-                    "score": 43,  # Using a non-multiple of 5 for errors too
+                    "score": 50,  # Could be any default score
                     "justification": "Error during evaluation",
                     "suggestions": []
                 }
