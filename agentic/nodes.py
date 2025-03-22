@@ -817,13 +817,6 @@ class PromptEvaluationNode(CallChatOpenAI):
             results = json.loads(evaluation_json)
             score = int(results["score"])
 
-            # If the score ends in 0 or 5, adjust it slightly
-            if score % 5 == 0:
-                # Add a small random adjustment (-2 to +2)
-                adjustment = random.choice([-2, -1, 1, 2])
-                # Keep between 1-99
-                score = max(1, min(99, score + adjustment))
-
             # Color coding based on score
             score_color = 'red'
             if score >= 90:
