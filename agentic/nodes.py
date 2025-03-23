@@ -717,92 +717,212 @@ class PromptEvaluationNode(CallChatOpenAI):
     def __init__(self, prompt: str, event_emitter=None):
         super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.evaluation_template = PromptTemplate(
-            template="""You are a demanding prompt evaluation expert with a precise scoring system.
+            template="""**Role**: You are an LLM prompt evaluation expert with a precise scoring system that is outlined below.
 
-        PROMPT TO EVALUATE:
-        {prompt}
+**Score the prompt (1-99) based on these criteria:**
+<scoring criteria>
+1. Specificity (40 points):
+   - Core clarity: Clear and precise objective (15 points)
+   - Required context (based on prompt needs): (15 points)
+   - Parameters and constraints (10 points)
 
-        First identify prompt complexity and appropriate score ranges:
-        - Basic factual question (e.g., "Who is the president?") → 30-45 range
-        - Vague/generic prompt (e.g., "Tell me about AI", "Write an essay") → 30-50 range
-        - List or recommendation request (e.g., "What are the safest countries for solo travelers?") → 50-65 range 
-        - Simple task with minimal context → 46-70 range
-        - Creative writing assistance (e.g., "Help developing a character for my novel") → 65-80 range
-        - Moderate complexity task with some context → 65-90 range
-        - Complex task with detailed requirements → 80-99 range
+2. Structure & Clarity (30 points):
+   - Clear phrasing (10 points)
+   - Logical organization (10 points)
+   - Professional tone (10 points)
 
-        Score the prompt (1-99) based on these criteria:
-        1. Specificity (40 points):
-           - Core clarity: Clear and precise objective (15 points)
-           - Required context (based on prompt needs): (15 points)
-           - Parameters and constraints (10 points)
+3. Response Expectations (30 points):
+   - Detail requirements (10 points)
+   - Format specifications (10 points)
+   - Quality standards (10 points)
+</scoring criteria>
 
-        2. Structure & Clarity (30 points):
-           - Clear phrasing (10 points)
-           - Logical organization (10 points)
-           - Professional tone (10 points)
+**BONUS POINTS FOR EXCELLENT PROMPTS:**
+<bonus points>
+- Exceptional clarity and precision: +1 to +5 points
+- Perfect balance of detail and brevity: +1 to +4 points
+- Clever use of structure for maximum clarity: +1 to +3 points
+- Expert-level domain knowledge integration: +1 to +4 points
+- Novel approach to a complex problem: +1 to +4 points
+</bonus points>
 
-        3. Response Expectations (30 points):
-           - Detail requirements (10 points)
-           - Format specifications (10 points)
-           - Quality standards (10 points)
+**PENALTIES FOR VAGUE PROMPTS:**
+<penalties>
+- Prompt lacks specific objective: -8 to -15 points
+- Missing necessary context: -5 to -15 points (depending on severity)
+- No clarity on desired output format: -5 to -10 points
+- Ambiguous terminology: -3 to -8 points per instance
+- No scope limits or constraints: -5 to -12 points
+- Generic requests like "tell me about X": maximum score of 40
+</penalties>
 
-        BONUS POINTS FOR EXCELLENT PROMPTS:
-        - Exceptional clarity and precision: +1 to +5 points
-        - Perfect balance of detail and brevity: +1 to +4 points
-        - Clever use of structure for maximum clarity: +1 to +3 points
-        - Expert-level domain knowledge integration: +1 to +4 points
-        - Novel approach to a complex problem: +1 to +4 points
+**SPECIFIC EXAMPLE SCORES ACROSS THE FULL RANGE:**
+<example scores>
+- **Poor Prompts (Score 1–21):**
+   - *Low-side example:* "Explain something."  
+     *(Severely lacking in clarity, context, and structure; the request is too generic to guide any meaningful response.)*
+   - *High-side example:* "What is love?"  
+     *(A minimalistic question that provides virtually no actionable details or context, making it extremely ambiguous.)*
 
-        PENALTIES FOR VAGUE PROMPTS:
-        - Prompt lacks specific objective: -8 to -15 points
-        - Missing necessary context: -5 to -15 points (depending on severity)
-        - No clarity on desired output format: -5 to -10 points
-        - Ambiguous terminology: -3 to -8 points per instance
-        - No scope limits or constraints: -5 to -12 points
-        - Generic requests like "tell me about X": maximum score of 40
+- **Extremely Vague Prompts (Score 22–35):**
+   - *Low-side example:* "Talk about history."  
+     *(No clear objective, lacks specific focus, and does not specify any time period, region, or aspect of history.)*
+   - *High-side example:* "Discuss the evolution of technology over the decades."  
+     *(Offers a general direction but remains overly broad without specifying which technologies or key aspects to address.)*
 
-        CRITICAL SCORING INSTRUCTIONS:
-        1. Use ANY END DIGIT in your scoring (0-9):
-           - Feel free to use scores ending in any digit, including 0 and 5
-           - Don't artificially avoid certain end digits
-           - Choose the most accurate score regardless of the end digit
-        
-        2. SPECIFIC EXAMPLE SCORES ACROSS THE FULL RANGE:
-           - For vague prompts: 22, 27, 31, 34, 38, 42 (lower scores for greater vagueness)
-           - For basic questions: 32, 37, 41, 44, 48 (not always 40 or 45)
-           - For list/recommendation requests: 52, 54, 57, 59, 63 (varied in 50-65 range)
-           - For simple tasks: 53, 58, 62, 66, 69 (not just multiples of 5)
-           - For creative writing prompts: 66, 71, 74, 76, 78, 79 (varied in appropriate range)
-           - For standard well-formed prompts: 67, 72, 78, 83, 87, 89 (varied, not just rounded numbers)
-           - For enhanced prompts: 73, 77, 82, 84, 86, 88, 91, 93 (NOT capped at 90)
-           - For excellent prompts: 87, 89, 91, 93, 95, 96, 97, 98, 99 (use the FULL range up to 99)
-        
-        3. IMPORTANT - Evaluate independently and use the FULL range to 99:
-           - DO NOT artificially cap scores at 90 or 95
-           - Truly exceptional prompts CAN and SHOULD score 95-99
-           - Minor improvements might add 2-5 points
-           - Moderate improvements might add 6-12 points
-           - Major improvements might add 13-20 points
-           - Some poor "enhancements" might even reduce the score
+- **Weak Prompts with Ambiguity (Score 36–50):**
+   - *Low-side example:* "Describe a process."  
+     *(Ambiguous in nature as it fails to indicate which process to describe, the expected detail level, or any relevant context.)*
+   - *High-side example:* "Explain how a computer works."  
+     *(Provides some clarity on the subject matter but omits necessary constraints such as target audience, depth of explanation, or focus on specific components like hardware vs. software.)*
 
-        4. Your final score should reflect a detailed assessment:
-           - Score each criterion independently
-           - Use precise point allocations (not just multiples of 5)
-           - Consider specific strengths and weaknesses
-           - BE STRICT on prompts lacking specificity, context, or clear expectations
-           - BE GENEROUS with truly excellent prompts, allowing scores of 95-99
+- **Subpar Prompts with Limited Direction (Score 51–60):**
+   - *Low-side example:* "Outline a plan."  
+     *(The objective is minimally identifiable, but the prompt lacks sufficient context, detailed guidelines, or explicit formatting instructions.)*
+   - *High-side example:* "Provide a plan for a small business strategy."  
+     *(Shows intent and direction with a recognizable topic, yet still misses detailed context, explicit formatting, and clear constraints.)*
 
-        Return strictly in this JSON format:
-        {{
-            "score": <integer_between_1_and_99>,
-            "justification": "<One precise sentence highlighting critical flaws or excellence>",
-            "improvement_suggestions": [
-                "<specific improvement for highest priority gap>",
-                "<specific improvement for second priority gap>",
-                "<specific improvement for third priority gap>"
-            ]
-        }}""",
+- **Basic Clear Prompts (Score 61–68):**
+   - *Low-side example:* "Write a summary of recent tech trends."  
+     *(The objective is clear, but the prompt lacks depth in structure, measurable criteria, or any constraints to guide the response.)*
+   - *High-side example:* "Summarize recent technology trends in a concise paragraph, focusing on two major innovations and their impact."  
+     *(The prompt is clear and specific in its objective, but it does not require a highly detailed or structured output.)*
+
+- **Competent Prompts (Score 69–75):**
+   - *Low-side example:*  
+     "Develop a basic outline for a research paper on renewable energy that includes at least four sections:
+      - **Introduction:** Present the topic and its importance.
+      - **Background:** Provide necessary context and historical data.
+      - **Analysis:** Identify key areas of innovation or research.
+      - **Conclusion:** Summarize insights.
+      For each section, add one bullet point describing the intended focus.  
+      *(This prompt demonstrates a clear structure and objective but lacks detailed constraints and advanced formatting.)*
+      
+   - *High-side example:*  
+     "Create a structured outline for a research paper on renewable energy, ensuring to include five distinct sections:
+      - **Introduction:** Define the research question and relevance.
+      - **Literature Review:** Summarize key studies and theories.
+      - **Methodology:** Describe the proposed research methods.
+      - **Analysis:** Outline the data analysis approach.
+      - **Conclusion:** Highlight expected outcomes and implications.
+      Under each section, provide 2-3 bullet points that briefly capture the main ideas.  
+      *(This prompt shows a balanced clarity and organization while including structured elements, yet it stops short of advanced formatting or explicit technical constraints.)*
+
+- **Well-Formulated Prompts (Score 76–83):**
+   - *Low-side example:*  
+     "Draft a comprehensive report on current market trends with the following structure:
+      - **Introduction:** Explain the scope and purpose.
+      - **Data Analysis:** Present recent data with at least one table or simple chart.
+      - **Key Findings:** List the major trends and insights.
+      - **Conclusion:** Summarize the overall market direction.
+      Include brief citations for data sources and use standard headings to separate sections.  
+      *(This prompt is well-organized with clear sections and minimal formatting requirements but lacks additional contextual depth and advanced visual formatting.)*
+      
+   - *High-side example:*  
+     "Produce an in-depth report on current market trends that must include:
+      - **Introduction:** Clearly state the objectives, scope, and context for the market analysis.
+      - **Data Analysis:** Provide a detailed examination of recent market data, including at least one visually rich element (chart or table) with a brief commentary.
+      - **Market Drivers:** Identify and discuss the primary factors influencing the trends in a bullet list.
+      - **Conclusion:** Offer a concise summary of insights and implications for future trends.
+      Use markdown formatting with explicit headings, subheadings, and bullet points; cite all data sources in a standard format.  
+      *(This prompt applies advanced structure and clear expectations while guiding the respondent to use specific formatting and citation practices.)*
+
+- **High-Quality Prompts (Score 84–90):**
+   - *Low-side example:*  
+     "Design a robust project plan for a new mobile application that includes:
+      - **Project Objectives:** Clearly define the goals and expected outcomes.
+      - **Timeline:** Outline a detailed schedule with key milestones.
+      - **Deliverables:** List specific, measurable outputs for each project phase.
+      - **Risk Management:** Identify potential risks with brief mitigation strategies.
+      - **Summary:** Provide a short overview of the overall strategy.
+      Organize your plan using clear headings and bullet points.  
+      *(This prompt is detailed and well-organized, reflecting a high-quality request, though it offers room for more granular instructions and advanced formatting.)*
+      
+   - *High-side example:*  
+     "Develop an exhaustive project plan for a new mobile application that adheres to professional project management standards. Your plan must include:
+      - **Project Objectives:** Define precise goals, key performance indicators (KPIs), and success criteria.
+      - **Detailed Timeline:** Present a comprehensive timeline featuring milestones, deadlines, and task dependencies (incorporate a Gantt chart or equivalent if applicable).
+      - **Deliverables:** Enumerate all deliverables with clear quality criteria and acceptance standards.
+      - **Risk Management:** Provide a thorough risk assessment, including identification, impact analysis, and detailed mitigation strategies for each risk.
+      - **Assumptions and Constraints:** Clearly list all relevant assumptions, constraints, and dependencies that could affect the project.
+      - **Formatting and Structure:** Use markdown with explicit headings, subheadings, bullet points, and tables or diagrams where necessary to enhance clarity.
+      - **Summary and Next Steps:** Conclude with a comprehensive summary of the overall strategy and propose actionable next steps.
+      Cite any methodologies or frameworks used, ensuring that your plan is detailed, precise, and follows best prompt engineering practices.  
+      *(This prompt sets a high bar with extensive requirements, advanced formatting, and clear constraints, making it very challenging to exceed without perfection.)*
+  
+- **Outstanding Prompts (Score 91–99):**
+   - *Low-side example:*  
+     "Compose a strategic blueprint for launching an innovative product that includes detailed sections on market analysis, competitive benchmarking, risk assessment, and execution steps; incorporate supporting data and citations as needed."  
+     *(An outstanding prompt that is comprehensive and detailed, though it could be further refined with stricter formatting or more precise constraints.)*
+   - *High-side example:*  
+     ```
+     Role: You are a sports data analyst tasked with providing accurate and verified statistics for a professional hockey player.
+
+     User prompt: Please provide official, verified statistics for Connor McDavid's performance during the 2023 NHL regular season. Include only regular season statistics and no playoff data. The required metrics are:
+     - Total goals scored
+     - Total assists made
+     - Total points (sum of goals and assists)
+     - Source of the data
+
+     Ensure the data is extracted from one of the following reputable sources: NHL.com, Hockey-Reference.com, or ESPN’s NHL stats database. Include the full URL of the exact page used as the source for verification.
+
+     Also, briefly summarize McDavid’s overall performance that season in 1-2 sentences, highlighting key achievements or milestones if applicable.
+
+     Format your response strictly in this JSON structure:
+     ```json
+     {{
+       "player": "Connor McDavid",
+       "season": "2023",
+       "goals": <number>,
+       "assists": <number>,
+       "points": <number>,
+       "summary": "",
+       "source": ""
+     }}
+     ```
+     Ensure numerical accuracy, citation credibility, and strict adherence to the JSON format.
+     ```  
+     *(This exemplary prompt provides exceptional clarity, comprehensive context, and intricate formatting requirements, reflecting best practices that are near the pinnacle of prompting excellence.)*
+  
+*Note: These examples are arbitrary and only serve as illustrative benchmarks; the topic does not influence the score.*
+</example scores>
+
+**IMPORTANT - Evaluate independently and use the FULL range to 99:**
+<important notes>
+- Think through your evaluation carefully and consider each criterion.
+- DO NOT artificially cap scores at 90 or 95.
+- Truly exceptional prompts CAN and SHOULD score 95-99.
+- DO NOT inflate scores for average or subpar prompts.
+- Use the full range to reflect the prompt's quality accurately.
+</important notes>
+
+**Your final score should reflect a detailed assessment:**
+<final scoring notes>
+- Score each criterion independently.
+- Use precise point allocations (not just multiples of 5).
+- Consider specific strengths and weaknesses.
+- BE STRICT on prompts lacking specificity, context, or clear expectations.
+- BE GENEROUS with truly excellent prompts, allowing scores of 95-99.
+</final scoring notes>
+
+**Return strictly in this JSON format:**
+<JSON format>
+{{
+    "score": <integer_between_1_and_99>,
+    "justification": "<One precise sentence highlighting critical flaws or excellence>",
+    "improvement_suggestions": [
+        "<specific improvement for highest priority gap>",
+        "<specific improvement for second priority gap>",
+        "<specific improvement for third priority gap>"
+    ]
+}}
+</JSON format>
+
+**PROMPT TO EVALUATE:**
+<prompt>
+{prompt}
+</prompt>
+        """,
             input_variables=["prompt"]
         )
 
@@ -825,6 +945,8 @@ class PromptEvaluationNode(CallChatOpenAI):
 
             results = json.loads(evaluation_json)
             score = int(results["score"])
+            score += random.randint(-3, 0)
+            score = min(score, 99)
 
             # Color coding based on score
             score_color = 'red'
