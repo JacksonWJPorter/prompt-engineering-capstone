@@ -725,16 +725,16 @@ class PromptEvaluationNode(CallChatOpenAI):
         First identify prompt complexity and appropriate score ranges:
         - Basic factual question (e.g., "Who is the president?") → 30-45 range
         - Vague/generic prompt (e.g., "Tell me about AI", "Write an essay") → 30-50 range
-        - List or recommendation request (e.g., "What are the safest countries for solo travelers?") → 50-60 range 
-        - Simple task with minimal context → 46-65 range
-        - Creative writing assistance (e.g., "Help developing a character for my novel") → 70-79 range
-        - Moderate complexity task with some context → 66-85 range
-        - Complex task with detailed requirements → 86-98 range
+        - List or recommendation request (e.g., "What are the safest countries for solo travelers?") → 50-65 range 
+        - Simple task with minimal context → 46-70 range
+        - Creative writing assistance (e.g., "Help developing a character for my novel") → 65-80 range
+        - Moderate complexity task with some context → 65-90 range
+        - Complex task with detailed requirements → 80-99 range
 
         Score the prompt (1-99) based on these criteria:
         1. Specificity (40 points):
-           - Core clarity: Clear and precise objective (10 points)
-           - Required context (based on prompt needs): (20 points)
+           - Core clarity: Clear and precise objective (15 points)
+           - Required context (based on prompt needs): (15 points)
            - Parameters and constraints (10 points)
 
         2. Structure & Clarity (30 points):
@@ -747,32 +747,40 @@ class PromptEvaluationNode(CallChatOpenAI):
            - Format specifications (10 points)
            - Quality standards (10 points)
 
-        STRICT PENALTIES FOR VAGUE PROMPTS:
-        - Prompt lacks specific objective: -10 to -15 points
-        - Missing necessary context: -5 to -20 points (depending on severity)
+        BONUS POINTS FOR EXCELLENT PROMPTS:
+        - Exceptional clarity and precision: +1 to +5 points
+        - Perfect balance of detail and brevity: +1 to +4 points
+        - Clever use of structure for maximum clarity: +1 to +3 points
+        - Expert-level domain knowledge integration: +1 to +4 points
+        - Novel approach to a complex problem: +1 to +4 points
+
+        PENALTIES FOR VAGUE PROMPTS:
+        - Prompt lacks specific objective: -8 to -15 points
+        - Missing necessary context: -5 to -15 points (depending on severity)
         - No clarity on desired output format: -5 to -10 points
         - Ambiguous terminology: -3 to -8 points per instance
-        - No scope limits or constraints: -5 to -15 points
-        - Generic requests like "tell me about X": maximum score of 35
+        - No scope limits or constraints: -5 to -12 points
+        - Generic requests like "tell me about X": maximum score of 40
 
         CRITICAL SCORING INSTRUCTIONS:
-        1. Use VARIED END DIGITS in your scoring. Your scores should have a mix of end digits:
-           - Use scores ending in 1, 2, 3, 4, 6, 7, 8, 9 MOST of the time
-           - Occasionally use scores ending in 0 or 5, but not as your default
+        1. Use ANY END DIGIT in your scoring (0-9):
+           - Feel free to use scores ending in any digit, including 0 and 5
+           - Don't artificially avoid certain end digits
+           - Choose the most accurate score regardless of the end digit
         
-        2. SPECIFIC EXAMPLE SCORES:
-           - For vague prompts: 22, 27, 31, 34 (lower scores for greater vagueness)
-           - For basic questions: 32, 37, 41, 44 (not always 40 or 45)
-           - For list/recommendation requests: 52, 54, 57, 59 (within 50-60 range)
-           - For simple tasks: 53, 58, 62, 64 (not always 50, 55, 60, 65)
-           - For creative writing prompts: 71, 74, 76, 78 (within 70-79 range)
-           - For standard prompts: 67, 71, 76, 83 (varied, not just 70, 75, 80, 85)
-           - For enhanced prompts: 73, 77, 82, 84, 86 (NOT automatically 85)
-           - For amazing prompts that have all best practices: 89, 90, 91, 92, 93, 94 
+        2. SPECIFIC EXAMPLE SCORES ACROSS THE FULL RANGE:
+           - For vague prompts: 22, 27, 31, 34, 38, 42 (lower scores for greater vagueness)
+           - For basic questions: 32, 37, 41, 44, 48 (not always 40 or 45)
+           - For list/recommendation requests: 52, 54, 57, 59, 63 (varied in 50-65 range)
+           - For simple tasks: 53, 58, 62, 66, 69 (not just multiples of 5)
+           - For creative writing prompts: 66, 71, 74, 76, 78, 79 (varied in appropriate range)
+           - For standard well-formed prompts: 67, 72, 78, 83, 87, 89 (varied, not just rounded numbers)
+           - For enhanced prompts: 73, 77, 82, 84, 86, 88, 91, 93 (NOT capped at 90)
+           - For excellent prompts: 87, 89, 91, 93, 95, 96, 97, 98, 99 (use the FULL range up to 99)
         
-        3. IMPORTANT - Each prompt must be evaluated independently:
-           - DO NOT automatically add 10 points to rephrased/enhanced prompts
-           - Some enhancements deserve +3 points, others +7, others +15, etc.
+        3. IMPORTANT - Evaluate independently and use the FULL range to 99:
+           - DO NOT artificially cap scores at 90 or 95
+           - Truly exceptional prompts CAN and SHOULD score 95-99
            - Minor improvements might add 2-5 points
            - Moderate improvements might add 6-12 points
            - Major improvements might add 13-20 points
@@ -783,6 +791,7 @@ class PromptEvaluationNode(CallChatOpenAI):
            - Use precise point allocations (not just multiples of 5)
            - Consider specific strengths and weaknesses
            - BE STRICT on prompts lacking specificity, context, or clear expectations
+           - BE GENEROUS with truly excellent prompts, allowing scores of 95-99
 
         Return strictly in this JSON format:
         {{
