@@ -816,8 +816,6 @@ class PromptEvaluationNode(CallChatOpenAI):
 
             results = json.loads(evaluation_json)
             score = int(results["score"])
-            
-            # Score adjustment code removed - use score exactly as returned
 
             # Color coding based on score
             score_color = 'red'
