@@ -279,7 +279,7 @@ class CategorizePromptNode(CallChatOpenAI):
 
 class QueryDisambiguationNode(CallChatOpenAI):
     def __init__(self, prompt: str, event_emitter=None):
-        super().__init__(prompt, category="query-disambiguation", event_emitter=event_emitter)
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are a clarification assistant.
@@ -499,7 +499,7 @@ class PromptEnhancerNode(CallChatOpenAI):
 
 class QueryDisambiguationNode(CallChatOpenAI):
     def __init__(self, prompt: str, event_emitter=None):
-        super().__init__(prompt, category="query-disambiguation", event_emitter=event_emitter)
+        super().__init__(prompt, category="default-chat-openai", event_emitter=event_emitter)
         self.prompt_template = PromptTemplate(
             template="""
             # Role: You are a clarification assistant.
